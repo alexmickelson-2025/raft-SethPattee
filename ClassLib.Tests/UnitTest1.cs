@@ -7,6 +7,7 @@ using NSubstitute;
 
 public class RaftNodeTests
 {
+
     // Testing #1: When a leader is active it sends a heart beat within 50ms.
     [Fact]
     public async Task LeaderSendsHeartbeatWithin50ms()

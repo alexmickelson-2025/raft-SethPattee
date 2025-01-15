@@ -10,7 +10,6 @@ public interface ITransport
     Task<bool> SendVoteRequestAsync(VoteRequest request);
     Task SendAppendEntriesResponseAsync(AppendEntriesResponse response);
 }
-
 public class RaftNode
 {
     public NodeState State { get; private set; }

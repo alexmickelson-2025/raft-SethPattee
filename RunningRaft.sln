@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ClassLib", "ClassLib\ClassL
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ClassLib.Tests", "ClassLib.Tests\ClassLib.Tests.csproj", "{AC3DA1AD-ECAF-43F9-8705-ACC0C454D57D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebSimulation", "WebSimulation\WebSimulation.csproj", "{A61DDDD2-EB15-4076-A9BC-513535524F75}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,5 +26,9 @@ Global
 		{AC3DA1AD-ECAF-43F9-8705-ACC0C454D57D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{AC3DA1AD-ECAF-43F9-8705-ACC0C454D57D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{AC3DA1AD-ECAF-43F9-8705-ACC0C454D57D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A61DDDD2-EB15-4076-A9BC-513535524F75}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A61DDDD2-EB15-4076-A9BC-513535524F75}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A61DDDD2-EB15-4076-A9BC-513535524F75}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A61DDDD2-EB15-4076-A9BC-513535524F75}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
