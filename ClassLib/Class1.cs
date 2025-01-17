@@ -6,27 +6,32 @@
 
 public interface ITransport
 {
-    Task SendAppendEntriesAsync(AppendEntries entries);
-    Task<bool> SendVoteRequestAsync(VoteRequest request);
-    Task SendAppendEntriesResponseAsync(AppendEntriesResponse response);
+    Task SendAppendEntriesAsync(AppendEntries entries, string recipientNodeId);
+    Task<bool> SendVoteRequestAsync(VoteRequest request, string recipientNodeId);
+    Task SendAppendEntriesResponseAsync(AppendEntriesResponse response, string recipientNodeId);
+
+    IEnumerable<string> GetOtherNodeIds(string currentNodeId); 
 }
+
 public class RaftNode
 {
-    public NodeState State { get; private set; }
-    public string? CurrentLeaderId { get; private set; }
+    public string NodeId { get; }
+    public NodeState State { get; set; }
+    public string? CurrentLeaderId { get; set; }
     public int Term { get; set; }
     public bool ElectionTimeoutExpired => _electionTimerExpired;
-    public int ElectionTimeout { get; private set; }
-    public string? LastVoteCandidateId { get; private set; }
-    public bool LastVoteGranted { get; private set; }
-    public bool LastAppendEntriesAccepted { get; private set; }
+    public int ElectionTimeout { get;  set; }
+    public string? LastVoteCandidateId { get; set; }
+    public bool LastVoteGranted { get;  set; }
+    public bool LastAppendEntriesAccepted { get;  set; }
 
-    private readonly IClock _clock;
-    private readonly ITransport _transport;
-    private bool _electionTimerExpired;
+    public IClock _clock;
+    public ITransport _transport;
+    public bool _electionTimerExpired;
 
-    public RaftNode(IClock clock, ITransport transport)
+    public RaftNode(string nodeId, IClock clock, ITransport transport)
     {
+        NodeId = nodeId;
         State = NodeState.Follower;
         _clock = clock;
         _transport = transport;
@@ -34,7 +39,7 @@ public class RaftNode
         ResetElectionTimer();
     }
 
-    public RaftNode(NodeState initialState, IClock clock, ITransport transport)
+    public RaftNode(string nodeId, NodeState initialState, IClock clock, ITransport transport)
     {
         State = initialState;
         _clock = clock;
@@ -47,9 +52,17 @@ public class RaftNode
     {
         if (State == NodeState.Leader)
         {
-            await _transport.SendAppendEntriesAsync(new AppendEntries());
+            var tasks = _transport.GetOtherNodeIds(NodeId)
+                                  .Select(id => _transport.SendAppendEntriesAsync(new AppendEntries
+                                  {
+                                      LeaderId = NodeId,
+                                      Term = Term
+                                  }, id));
+
+            await Task.WhenAll(tasks); 
         }
     }
+
 
     public void ReceiveAppendEntries(AppendEntries appendEntries)
     {
@@ -69,8 +82,15 @@ public class RaftNode
     public async Task ReceiveAppendEntriesAsync(AppendEntries appendEntries)
     {
         ReceiveAppendEntries(appendEntries);
-        await _transport.SendAppendEntriesResponseAsync(new AppendEntriesResponse { Success = LastAppendEntriesAccepted });
+        if (!string.IsNullOrEmpty(appendEntries.LeaderId))
+        {
+            await _transport.SendAppendEntriesResponseAsync(new AppendEntriesResponse
+            {
+                Success = LastAppendEntriesAccepted
+            }, appendEntries.LeaderId); 
+        }
     }
+
 
     public void ReceiveVoteRequest(VoteRequest request)
     {
@@ -85,13 +105,30 @@ public class RaftNode
         LastVoteGranted = true;
     }
 
-    public void StartElection()
+    public async Task StartElection()
     {
         if (State == NodeState.Follower || State == NodeState.Candidate)
         {
             State = NodeState.Candidate;
             Term++;
-            LastVoteCandidateId = "Self";
+            LastVoteCandidateId = NodeId;
+
+            
+            var tasks = _transport.GetOtherNodeIds(NodeId)
+                                  .Select(id => _transport.SendVoteRequestAsync(new VoteRequest
+                                  {
+                                      CandidateId = NodeId,
+                                      Term = Term
+                                  }, id));
+
+            var responses = await Task.WhenAll(tasks);
+            int votesGranted = responses.Count(v => v);
+
+            if (votesGranted >= (_transport.GetOtherNodeIds(NodeId).Count() / 2) + 1)
+            {
+                State = NodeState.Leader;
+                CurrentLeaderId = NodeId;
+            }
         }
     }
 
@@ -143,14 +180,15 @@ public enum NodeState
 
 public class AppendEntries
 {
-    public string LeaderId { get; set; } = "";
-    public int Term { get; set; }
+    public string LeaderId { get; set; } = string.Empty; 
+    public int Term { get; set; } 
 }
 
 public class AppendEntriesResponse
 {
-    public bool Success { get; set; }
+    public bool Success { get; set; } 
 }
+
 
 public class VoteRequest
 {

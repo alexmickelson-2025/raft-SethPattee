@@ -1,7 +1,122 @@
 ﻿@page "/"
+@rendermode InteractiveServer
+@using System.Timers
 
-<PageTitle>Home</PageTitle>
+<h3>Raft Simulation</h3>
 
-<h1>Hello, world!</h1>
+<div>
+    <h4>Nodes</h4>
+    @foreach (var node in Nodes)
+    {
+        <div style="border: 1px solid black; margin: 5px; padding: 5px;">
+            <p><strong>Node:</strong> @node.Key</p>
+            <p><strong>State:</strong> @node.Value.State</p>
+            <p><strong>Term:</strong> @node.Value.Term</p>
+            <p><strong>Leader:</strong> @(node.Value.CurrentLeaderId ?? "None")</p>
+            <p><strong>Election Timeout:</strong> @node.Value.ElectionTimeout ms</p>
+            <p><strong>Timeout Remaining:</strong> @TimeoutRemaining[node.Key] ms</p>
+        </div>
+    }
+</div>
 
-Welcome to your new app.
+<div>
+    <h4>Simulation Controls</h4>
+    <label>Network Delay: @NetworkDelay ms</label>
+    <input type="range" min="0" max="2000" step="100" value="@NetworkDelay" @oninput="OnNetworkDelayChanged" />
+    <br />
+    <label>Election Timeout Multiplier: @TimeoutMultiplier</label>
+    <input type="range" min="1" max="5" step="0.1" value="@TimeoutMultiplier" @oninput="OnTimeoutMultiplierChanged" />
+</div>
+@code {
+    private Dictionary<string, RaftNode> Nodes = new();
+    private Dictionary<string, MockTransport> NodeTransports = new(); 
+    private Dictionary<string, int> TimeoutRemaining = new();
+    private int NetworkDelay = 0;
+    private double TimeoutMultiplier = 1.0;
+    private Timer? _visualizationTimer;
+
+    protected override void OnInitialized()
+    {
+        InitializeNodes();
+
+       
+        _visualizationTimer = new Timer(100);
+        _visualizationTimer.Elapsed += UpdateTimeouts;
+        _visualizationTimer.Start();
+
+        StartSimulation();
+    }
+
+    private void InitializeNodes()
+    {
+        var transport = new MockTransport(NetworkDelay);
+
+        for (int i = 1; i <= 5; i++)
+        {
+            string nodeId = $"Node-{i}";
+            var clock = new SystemClock();
+            var node = new RaftNode(nodeId, clock, transport);
+
+            Nodes[nodeId] = node;
+            transport.AddNode(node); 
+            TimeoutRemaining[nodeId] = node.ElectionTimeout;
+        }
+    }
+
+
+
+    private void StartSimulation()
+    {
+        foreach (var node in Nodes.Values)
+        {
+            SimulateNodeBehavior(node);
+        }
+    }
+
+    private async void SimulateNodeBehavior(RaftNode node)
+    {
+        while (true)
+        {
+            if (node.State == NodeState.Follower || node.State == NodeState.Candidate)
+            {
+                await Task.Delay(node.ElectionTimeout);
+                await node.StartElection();
+            }
+            else if (node.State == NodeState.Leader)
+            {
+                await node.SendHeartbeatAsync();
+            }
+            await Task.Delay(100); 
+        }
+    }
+
+    private void UpdateTimeouts(object? sender, ElapsedEventArgs e)
+    {
+        foreach (var node in Nodes)
+        {
+            TimeoutRemaining[node.Key] = Math.Max(0, TimeoutRemaining[node.Key] - 100);
+        }
+
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnNetworkDelayChanged(ChangeEventArgs e)
+    {
+        NetworkDelay = int.Parse(e.Value?.ToString() ?? "0");
+        foreach (var transport in NodeTransports.Values)
+        {
+            transport.SetNetworkDelay(NetworkDelay);
+        }
+    }
+
+    private void OnTimeoutMultiplierChanged(ChangeEventArgs e)
+    {
+        TimeoutMultiplier = double.Parse(e.Value?.ToString() ?? "1.0");
+        foreach (var node in Nodes.Values)
+        {
+            node.ResetElectionTimer();
+            node.ElectionTimeout = (int)(node.ElectionTimeout * TimeoutMultiplier);
+        }
+    }
+}
+
