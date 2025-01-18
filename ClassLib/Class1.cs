@@ -47,6 +47,14 @@ public class RaftNode
         Term = 0;
         ResetElectionTimer();
     }
+    public async Task RunLeaderTasksAsync()
+    {
+        while (State == NodeState.Leader)
+        {
+            await SendHeartbeatAsync();
+            await Task.Delay(100); // Send heartbeats every 100ms
+        }
+    }
 
     public async Task SendHeartbeatAsync()
     {
@@ -75,9 +83,10 @@ public class RaftNode
         State = NodeState.Follower;
         CurrentLeaderId = appendEntries.LeaderId;
         Term = Math.Max(Term, appendEntries.Term);
-        ResetElectionTimer();
+        ResetElectionTimer(); // Reset timeout to prevent premature elections
         LastAppendEntriesAccepted = true;
     }
+
 
     public async Task ReceiveAppendEntriesAsync(AppendEntries appendEntries)
     {
@@ -103,17 +112,21 @@ public class RaftNode
         LastVoteCandidateId = request.CandidateId;
         Term = Math.Max(Term, request.Term);
         LastVoteGranted = true;
+        ResetElectionTimer(); // Reset timeout after granting a vote
     }
+
 
     public async Task StartElection()
     {
         if (State == NodeState.Follower || State == NodeState.Candidate)
         {
             State = NodeState.Candidate;
+            OnStateChanged(); // Notify about state change
+
             Term++;
             LastVoteCandidateId = NodeId;
 
-            
+            // Send vote requests to all other nodes
             var tasks = _transport.GetOtherNodeIds(NodeId)
                                   .Select(id => _transport.SendVoteRequestAsync(new VoteRequest
                                   {
@@ -128,9 +141,22 @@ public class RaftNode
             {
                 State = NodeState.Leader;
                 CurrentLeaderId = NodeId;
+                OnStateChanged(); // Notify about leader state change
+            }
+
+            else
+            {
+                ResetElectionTimer(); // Start new election if not enough votes
             }
         }
     }
+
+    private void OnStateChanged()
+    {
+        // Hook this to your UI update logic
+        Console.WriteLine($"Node {NodeId} changed state to {State} in Term {Term}");
+    }
+
 
 
     public void ReceiveVote(bool granted)
@@ -156,8 +182,10 @@ public class RaftNode
             State = NodeState.Candidate;
             Term++;
             ResetElectionTimer();
+            await StartElection();
         }
     }
+
     public async Task CheckElectionTimeoutDuringElectionAsync()
     {
         await Task.Delay(ElectionTimeout);
