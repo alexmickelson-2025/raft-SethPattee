@@ -52,7 +52,13 @@ public class MockTransport : ITransport
     public async Task SendAppendEntriesResponseAsync(AppendEntriesResponse response, string recipientNodeId)
     {
         await Task.Delay(_networkDelay);
-        // TODO
+        if (_nodes.TryGetValue(recipientNodeId, out var recipientNode))
+        {
+            if (response.Success)
+            {
+                recipientNode.ResetElectionTimer();
+            }
+        }
     }
 
     public void SetNetworkDelay(int delay)

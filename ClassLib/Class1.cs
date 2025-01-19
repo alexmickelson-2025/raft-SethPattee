@@ -1,4 +1,5 @@
-﻿public interface IClock
+﻿//RaftNode.cs
+public interface IClock
 {
     DateTime GetCurrentTime();
     void AdvanceBy(TimeSpan duration);
@@ -52,7 +53,7 @@ public class RaftNode
         while (State == NodeState.Leader)
         {
             await SendHeartbeatAsync();
-            await Task.Delay(100); // Send heartbeats every 100ms
+            await Task.Delay(50);
         }
     }
 
@@ -60,14 +61,15 @@ public class RaftNode
     {
         if (State == NodeState.Leader)
         {
-            var tasks = _transport.GetOtherNodeIds(NodeId)
-                                  .Select(id => _transport.SendAppendEntriesAsync(new AppendEntries
-                                  {
-                                      LeaderId = NodeId,
-                                      Term = Term
-                                  }, id));
+            var otherNodes = _transport.GetOtherNodeIds(NodeId).ToList();
+            var tasks = otherNodes.Select(id => _transport.SendAppendEntriesAsync(
+                new AppendEntries
+                {
+                    LeaderId = NodeId,
+                    Term = Term
+                }, id));
 
-            await Task.WhenAll(tasks); 
+            await Task.WhenAll(tasks);
         }
     }
 
@@ -80,10 +82,17 @@ public class RaftNode
             return;
         }
 
-        State = NodeState.Follower;
+        ResetElectionTimer();
+        _electionTimerExpired = false;
+
+        if (State != NodeState.Follower)
+        {
+            State = NodeState.Follower;
+            OnStateChanged();
+        }
+
         CurrentLeaderId = appendEntries.LeaderId;
         Term = Math.Max(Term, appendEntries.Term);
-        ResetElectionTimer(); // Reset timeout to prevent premature elections
         LastAppendEntriesAccepted = true;
     }
 
@@ -112,7 +121,7 @@ public class RaftNode
         LastVoteCandidateId = request.CandidateId;
         Term = Math.Max(Term, request.Term);
         LastVoteGranted = true;
-        ResetElectionTimer(); // Reset timeout after granting a vote
+        ResetElectionTimer(); 
     }
 
 
@@ -121,12 +130,11 @@ public class RaftNode
         if (State == NodeState.Follower || State == NodeState.Candidate)
         {
             State = NodeState.Candidate;
-            OnStateChanged(); // Notify about state change
+            OnStateChanged();
 
             Term++;
             LastVoteCandidateId = NodeId;
 
-            // Send vote requests to all other nodes
             var tasks = _transport.GetOtherNodeIds(NodeId)
                                   .Select(id => _transport.SendVoteRequestAsync(new VoteRequest
                                   {
@@ -141,19 +149,18 @@ public class RaftNode
             {
                 State = NodeState.Leader;
                 CurrentLeaderId = NodeId;
-                OnStateChanged(); // Notify about leader state change
+                OnStateChanged(); 
             }
 
             else
             {
-                ResetElectionTimer(); // Start new election if not enough votes
+                ResetElectionTimer(); 
             }
         }
     }
 
     private void OnStateChanged()
     {
-        // Hook this to your UI update logic
         Console.WriteLine($"Node {NodeId} changed state to {State} in Term {Term}");
     }
 
@@ -170,18 +177,16 @@ public class RaftNode
     public void ResetElectionTimer()
     {
         var random = new Random();
-        ElectionTimeout = random.Next(150, 301);
+        ElectionTimeout = random.Next(1500, 3001);
         _electionTimerExpired = false;
     }
 
     public async Task CheckElectionTimeoutAsync()
     {
         await Task.Delay(ElectionTimeout);
-        if (State == NodeState.Follower)
+
+        if (State == NodeState.Follower && _electionTimerExpired)
         {
-            State = NodeState.Candidate;
-            Term++;
-            ResetElectionTimer();
             await StartElection();
         }
     }

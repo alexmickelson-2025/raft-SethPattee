@@ -50,17 +50,16 @@
     private void InitializeNodes()
     {
         var transport = new MockTransport(NetworkDelay);
-
         for (int i = 1; i <= 5; i++)
         {
             string nodeId = $"Node-{i}";
             var clock = new SystemClock();
             var node = new RaftNode(nodeId, clock, transport);
-
             Nodes[nodeId] = node;
-            transport.AddNode(node); 
+            transport.AddNode(node);
             TimeoutRemaining[nodeId] = node.ElectionTimeout;
         }
+        NodeTransports["main"] = transport;
     }
 
 
@@ -73,20 +72,45 @@
         }
     }
 
-    private async void SimulateNodeBehavior(RaftNode node)
+    private async Task SimulateNodeBehavior(RaftNode node)
     {
         while (true)
         {
-            if (node.State == NodeState.Follower || node.State == NodeState.Candidate)
+            try
             {
-                await Task.Delay(node.ElectionTimeout);
-                await node.StartElection();
+                switch (node.State)
+                {
+                    case NodeState.Follower:
+                        if (!node._electionTimerExpired)
+                        {
+                            node._electionTimerExpired = true;
+                            await node.CheckElectionTimeoutAsync();
+                        }
+                        break;
+
+                    case NodeState.Candidate:
+                        await node.CheckElectionTimeoutDuringElectionAsync();
+                        break;
+
+                    case NodeState.Leader:
+                        await node.RunLeaderTasksAsync();
+                        break;
+                }
             }
-            else if (node.State == NodeState.Leader)
+            catch (Exception ex)
             {
-                await node.SendHeartbeatAsync();
+                Console.WriteLine($"Error in node {node.NodeId}: {ex.Message}");
             }
-            await Task.Delay(100); 
+
+            await Task.Delay(50);
+        }
+    }
+
+    private void ResetNodeTimeout(string nodeId)
+    {
+        if (TimeoutRemaining.ContainsKey(nodeId))
+        {
+            TimeoutRemaining[nodeId] = Nodes[nodeId].ElectionTimeout;
         }
     }
 
@@ -94,9 +118,20 @@
     {
         foreach (var node in Nodes)
         {
-            TimeoutRemaining[node.Key] = Math.Max(0, TimeoutRemaining[node.Key] - 100);
+            if (node.Value.State == NodeState.Follower)
+            {
+                TimeoutRemaining[node.Key] = Math.Max(0, TimeoutRemaining[node.Key] - 100);
+                if (TimeoutRemaining[node.Key] <= 0)
+                {
+                    ResetNodeTimeout(node.Key);
+                    node.Value._electionTimerExpired = true;
+                }
+            }
+            else if (node.Value.State == NodeState.Leader)
+            {
+                TimeoutRemaining[node.Key] = node.Value.ElectionTimeout;
+            }
         }
-
         InvokeAsync(StateHasChanged);
     }
 
