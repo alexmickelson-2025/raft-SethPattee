@@ -112,16 +112,26 @@ public class RaftNode
 
     public void ReceiveVoteRequest(VoteRequest request)
     {
-        if (request.Term < Term || (request.Term == Term && LastVoteCandidateId != null))
+        if (request.Term > Term)
+        {
+            Term = request.Term;
+            State = NodeState.Follower;
+            OnStateChanged();
+            CurrentLeaderId = null;
+            LastVoteCandidateId = null;
+        }
+
+        if (request.Term < Term ||
+            (request.Term == Term && LastVoteCandidateId != null && LastVoteCandidateId != request.CandidateId))
         {
             LastVoteGranted = false;
             return;
         }
 
         LastVoteCandidateId = request.CandidateId;
-        Term = Math.Max(Term, request.Term);
         LastVoteGranted = true;
-        ResetElectionTimer(); 
+        ResetElectionTimer();
+        _electionTimerExpired = false;
     }
 
 
@@ -134,27 +144,43 @@ public class RaftNode
 
             Term++;
             LastVoteCandidateId = NodeId;
+            LastVoteGranted = true;
 
-            var tasks = _transport.GetOtherNodeIds(NodeId)
-                                  .Select(id => _transport.SendVoteRequestAsync(new VoteRequest
-                                  {
-                                      CandidateId = NodeId,
-                                      Term = Term
-                                  }, id));
+            int votesGranted = 1;
 
-            var responses = await Task.WhenAll(tasks);
-            int votesGranted = responses.Count(v => v);
-
-            if (votesGranted >= (_transport.GetOtherNodeIds(NodeId).Count() / 2) + 1)
+            try
             {
-                State = NodeState.Leader;
-                CurrentLeaderId = NodeId;
-                OnStateChanged(); 
+                var otherNodes = _transport.GetOtherNodeIds(NodeId).ToList();
+                var tasks = otherNodes.Select(id => _transport.SendVoteRequestAsync(new VoteRequest
+                {
+                    CandidateId = NodeId,
+                    Term = Term
+                }, id));
+
+                var responses = await Task.WhenAll(tasks);
+                votesGranted += responses.Count(v => v);
+
+                int majorityNeeded = (otherNodes.Count + 1) / 2 + 1;
+
+                if (votesGranted >= majorityNeeded)
+                {
+                    State = NodeState.Leader;
+                    CurrentLeaderId = NodeId;
+                    OnStateChanged();
+                    await SendHeartbeatAsync();
+                }
+                else
+                {
+                    State = NodeState.Follower;
+                    OnStateChanged();
+                    ResetElectionTimer();
+                }
             }
-
-            else
+            catch (Exception)
             {
-                ResetElectionTimer(); 
+                State = NodeState.Follower;
+                OnStateChanged();
+                ResetElectionTimer();
             }
         }
     }
@@ -193,11 +219,16 @@ public class RaftNode
 
     public async Task CheckElectionTimeoutDuringElectionAsync()
     {
-        await Task.Delay(ElectionTimeout);
         if (State == NodeState.Candidate)
         {
-            Term++;
-            ResetElectionTimer();
+            await Task.Delay(ElectionTimeout);
+            if (State == NodeState.Candidate)
+            {
+                State = NodeState.Follower;
+                OnStateChanged();
+                ResetElectionTimer();
+                _electionTimerExpired = false;
+            }
         }
     }
 

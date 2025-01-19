@@ -86,23 +86,30 @@
                             node._electionTimerExpired = true;
                             await node.CheckElectionTimeoutAsync();
                         }
+                        await Task.Delay(50);
                         break;
 
                     case NodeState.Candidate:
                         await node.CheckElectionTimeoutDuringElectionAsync();
+                        if (node.State == NodeState.Candidate)
+                        {
+                            await node.StartElection();
+                        }
+                        await Task.Delay(50);
                         break;
 
                     case NodeState.Leader:
                         await node.RunLeaderTasksAsync();
+                        await Task.Delay(50);
                         break;
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error in node {node.NodeId}: {ex.Message}");
+                node.State = NodeState.Follower;
+                node.ResetElectionTimer();
             }
-
-            await Task.Delay(50);
         }
     }
 
