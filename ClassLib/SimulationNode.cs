@@ -1,3 +1,4 @@
+//SimulationNode.cs
 public class SystemClock : IClock
 {
     private DateTime _currentTime = DateTime.UtcNow;
@@ -49,7 +50,7 @@ public class MockTransport : ITransport
         return false;
     }
 
-    public async Task SendAppendEntriesResponseAsync(AppendEntriesResponse response, string recipientNodeId)
+    public async Task<AppendEntriesResponse> SendAppendEntriesResponseAsync(AppendEntriesResponse response, string recipientNodeId)
     {
         await Task.Delay(_networkDelay);
         if (_nodes.TryGetValue(recipientNodeId, out var recipientNode))
@@ -59,6 +60,7 @@ public class MockTransport : ITransport
                 recipientNode.ResetElectionTimer();
             }
         }
+        return response; // Return the response to the caller
     }
 
     public void SetNetworkDelay(int delay)
@@ -66,4 +68,3 @@ public class MockTransport : ITransport
         _networkDelay = delay;
     }
 }
-
