@@ -284,7 +284,7 @@ public class RaftNodeTests
         Assert.Equal("command2", node.GetLog()[1].Command);
         Assert.True(node.LastAppendEntriesAccepted);
     }
-    //#10
+    //#11
     [Fact]
     public async Task Follower_Response_IncludesTermAndLastLogIndex()
     {
