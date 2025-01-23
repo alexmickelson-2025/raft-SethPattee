@@ -60,11 +60,21 @@ public class MockTransport : ITransport
                 recipientNode.ResetElectionTimer();
             }
         }
-        return response; // Return the response to the caller
+        return response; 
     }
 
     public void SetNetworkDelay(int delay)
     {
         _networkDelay = delay;
+    }
+
+    Task ITransport.SendAppendEntriesResponseAsync(AppendEntriesResponse response, string recipientNodeId)
+    {
+        throw new NotImplementedException();
+    }
+
+    Task<AppendEntriesResponse> ITransport.SendAppendEntriesAsync(AppendEntries entries, string recipientNodeId)
+    {
+        throw new NotImplementedException();
     }
 }
