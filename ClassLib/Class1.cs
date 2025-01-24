@@ -90,7 +90,7 @@ public class RaftNode
             var otherNodes = _transport.GetOtherNodeIds(NodeId).ToList();
             foreach (var id in otherNodes)
             {
-                _nextIndex[id] = _log.Count + 1; 
+                _nextIndex[id] = _log.Count + 1;
             }
 
             var tasks = otherNodes.Select(id => _transport.SendAppendEntriesAsync(
@@ -104,7 +104,7 @@ public class RaftNode
 
             var responses = await Task.WhenAll(tasks);
 
-            int successfulResponses = responses.Count(r => r != null && r.Success) + 1; 
+            int successfulResponses = responses.Count(r => r != null && r.Success) + 1;
 
             int majorityNeeded = (otherNodes.Count + 1) / 2 + 1;
 
@@ -116,6 +116,7 @@ public class RaftNode
             }
         }
     }
+    
 
     public List<LogEntry> GetLog()
     {
@@ -139,6 +140,7 @@ public class RaftNode
         }
     }
 
+    
     public async Task ReceiveClientCommandAsync(string command, Action<bool> onCommitConfirmed = null)
     {
         if (State == NodeState.Leader)
@@ -154,7 +156,7 @@ public class RaftNode
             await SendHeartbeatAsync();
 
             int majorityNeeded = (_nextIndex.Count + 1) / 2 + 1;
-            int responsesReceived = 1; 
+            int responsesReceived = 1;
 
             foreach (var id in _nextIndex.Keys)
             {
@@ -187,7 +189,6 @@ public class RaftNode
         }
     }
 
-
     public async Task SendHeartbeatAsync()
     {
         if (State == NodeState.Leader)
@@ -198,20 +199,23 @@ public class RaftNode
             {
                 if (!_nextIndex.ContainsKey(id))
                 {
-                    _nextIndex[id] = _log.Count + 1; 
+                    _nextIndex[id] = _log.Count + 1;
                 }
+
+                int prevLogIndex = _nextIndex[id] - 1;
+                int prevLogTerm = prevLogIndex >= 0 && prevLogIndex < _log.Count ? _log[prevLogIndex].Term : -1;
+
+                await _transport.SendAppendEntriesAsync(
+                    new AppendEntries
+                    {
+                        LeaderId = NodeId,
+                        Term = Term,
+                        PrevLogIndex = prevLogIndex,
+                        PrevLogTerm = prevLogTerm,
+                        LeaderCommit = _commitIndex,
+                        LogEntries = new List<LogEntry>()
+                    }, id);
             }
-
-            var tasks = otherNodes.Select(id => _transport.SendAppendEntriesAsync(
-                new AppendEntries
-                {
-                    LeaderId = NodeId,
-                    Term = Term,
-                    LogEntries = _log,
-                    LeaderCommit = _commitIndex
-                }, id));
-
-            await Task.WhenAll(tasks);
         }
     }
 
@@ -249,21 +253,77 @@ public class RaftNode
         }
     }
 
-
     public async Task ReceiveAppendEntriesAsync(AppendEntries appendEntries)
     {
-        ReceiveAppendEntries(appendEntries);
-
-        if (!string.IsNullOrEmpty(appendEntries.LeaderId))
+        if (appendEntries.Term < Term)
         {
-            await _transport.SendAppendEntriesResponseAsync(new AppendEntriesResponse
-            {
-                Success = LastAppendEntriesAccepted,
-                Term = Term,
-                LastLogIndex = _log.Count
-            }, appendEntries.LeaderId);
+            LastAppendEntriesAccepted = false;
+            await SendAppendEntriesResponseAsync(false);
+            return;
         }
+
+        ResetElectionTimer();
+        _electionTimerExpired = false;
+
+        if (State != NodeState.Follower)
+        {
+            State = NodeState.Follower;
+            OnStateChanged();
+        }
+
+        CurrentLeaderId = appendEntries.LeaderId;
+        Term = Math.Max(Term, appendEntries.Term);
+
+        if (appendEntries.PrevLogIndex >= _log.Count)
+        {
+            LastAppendEntriesAccepted = false;
+            await SendAppendEntriesResponseAsync(false);
+            return;
+        }
+
+        if (appendEntries.PrevLogIndex >= 0 && appendEntries.PrevLogIndex < _log.Count)
+        {
+            if (_log[appendEntries.PrevLogIndex].Term != appendEntries.PrevLogTerm)
+            {
+                LastAppendEntriesAccepted = false;
+                await SendAppendEntriesResponseAsync(false);
+                return;
+            }
+        }
+
+        LastAppendEntriesAccepted = true;
+
+        if (appendEntries.LogEntries != null && appendEntries.LogEntries.Count > 0)
+        {
+            _log.AddRange(appendEntries.LogEntries);
+        }
+
+        if (appendEntries.LeaderCommit > _commitIndex)
+        {
+            _commitIndex = Math.Min(appendEntries.LeaderCommit, _log.Count - 1);
+        }
+
+        await ApplyCommittedEntriesAsync();
+
+        await SendAppendEntriesResponseAsync(true);
     }
+
+    private async Task SendAppendEntriesResponseAsync(bool success)
+    {
+        if (_transport == null) return; 
+
+        int lastLogIndex = _log?.Count > 0 ? _log.Count - 1 : -1;
+
+        await _transport.SendAppendEntriesResponseAsync(new AppendEntriesResponse
+        {
+            Success = success,
+            Term = Term,
+            LastLogIndex = lastLogIndex
+        }, CurrentLeaderId ?? string.Empty);
+    }
+
+
+
     public async Task ReceiveAppendEntriesResponseAsync(AppendEntriesResponse response, string followerId)
     {
         if (State != NodeState.Leader)
@@ -288,11 +348,25 @@ public class RaftNode
         else
         {
             _nextIndex[followerId] = Math.Max(_nextIndex[followerId] - 1, 1);
+
+            int prevLogIndex = _nextIndex[followerId] - 1;
+            int prevLogTerm = prevLogIndex >= 0 && prevLogIndex < _log.Count ? _log[prevLogIndex].Term : -1;
+
+            await _transport.SendAppendEntriesAsync(
+                new AppendEntries
+                {
+                    LeaderId = NodeId,
+                    Term = Term,
+                    PrevLogIndex = prevLogIndex,
+                    PrevLogTerm = prevLogTerm,
+                    LeaderCommit = _commitIndex,
+                    LogEntries = _log.Skip(prevLogIndex + 1).ToList()
+                }, followerId);
         }
     }
 
 
-  
+
 
 
     public void ReceiveVoteRequest(VoteRequest request)
@@ -443,6 +517,8 @@ public class AppendEntries
 {
     public string LeaderId { get; set; } = string.Empty;
     public int Term { get; set; }
+    public int PrevLogIndex { get; set; } = -1;
+    public int PrevLogTerm { get; set; } = -1;
     public int LeaderCommit { get; set; }
     public List<LogEntry> LogEntries { get; set; } = new List<LogEntry>();
 }
