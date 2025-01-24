@@ -75,7 +75,7 @@ public class RaftNode
             var otherNodes = _transport.GetOtherNodeIds(NodeId).ToList();
             foreach (var id in otherNodes)
             {
-                _nextIndex[id] = _log.Count + 1;
+                _nextIndex[id] = _log.Count;
             }
         }
     }
@@ -199,7 +199,8 @@ public class RaftNode
             {
                 if (!_nextIndex.ContainsKey(id))
                 {
-                    _nextIndex[id] = _log.Count + 1;
+                    throw new InvalidOperationException("Leader Does not have index for follower nodes");
+                    //_nextIndex[id] = _log.Count + 1;
                 }
 
                 int prevLogIndex = _nextIndex[id] - 1;
@@ -265,24 +266,24 @@ public class RaftNode
         ResetElectionTimer();
         _electionTimerExpired = false;
 
-        if (State != NodeState.Follower)
+        if (appendEntries.Term > Term)
         {
-            State = NodeState.Follower;
+            Term = appendEntries.Term;
+            State = NodeState.Follower; 
             OnStateChanged();
         }
 
         CurrentLeaderId = appendEntries.LeaderId;
-        Term = Math.Max(Term, appendEntries.Term);
 
-        if (appendEntries.PrevLogIndex >= _log.Count)
+        if (appendEntries.PrevLogIndex >= 0)
         {
-            LastAppendEntriesAccepted = false;
-            await SendAppendEntriesResponseAsync(false);
-            return;
-        }
+            if (appendEntries.PrevLogIndex >= _log.Count)
+            {
+                LastAppendEntriesAccepted = false;
+                await SendAppendEntriesResponseAsync(false);
+                return;
+            }
 
-        if (appendEntries.PrevLogIndex >= 0 && appendEntries.PrevLogIndex < _log.Count)
-        {
             if (_log[appendEntries.PrevLogIndex].Term != appendEntries.PrevLogTerm)
             {
                 LastAppendEntriesAccepted = false;
@@ -310,16 +311,20 @@ public class RaftNode
 
     private async Task SendAppendEntriesResponseAsync(bool success)
     {
-        if (_transport == null) return; 
+        if (_transport == null) return;
 
         int lastLogIndex = _log?.Count > 0 ? _log.Count - 1 : -1;
 
-        await _transport.SendAppendEntriesResponseAsync(new AppendEntriesResponse
+        var response = new AppendEntriesResponse
         {
             Success = success,
             Term = Term,
             LastLogIndex = lastLogIndex
-        }, CurrentLeaderId ?? string.Empty);
+        };
+
+        Console.WriteLine($"Sending response: Success={response.Success}, Term={response.Term}");
+
+        await _transport.SendAppendEntriesResponseAsync(response, CurrentLeaderId ?? string.Empty);
     }
 
 

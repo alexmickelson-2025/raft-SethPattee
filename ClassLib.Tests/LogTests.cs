@@ -135,7 +135,11 @@ public class RaftNodeTests
         var transport = Substitute.For<ITransport>();
         var stateMachine = Substitute.For<IStateMachine>();
 
+        transport.GetOtherNodeIds(Arg.Any<string>()).Returns(["TestNode","node1"]);
+
         var leader = new RaftNode("leaderNode", NodeState.Leader, clock, transport, stateMachine);
+
+        Assert.Equal(0, leader._nextIndex["TestNode"]);
 
         var otherNodeIds = new List<string> { "node1", "node2" };
         transport.GetOtherNodeIds("leaderNode").Returns(otherNodeIds);
@@ -329,6 +333,7 @@ public class RaftNodeTests
         var stateMachine = new SimpleStateMachine();
         var node = new RaftNode("leaderNode", NodeState.Leader, clock, transport, stateMachine);
 
+        transport.GetOtherNodeIds(Arg.Any<string>()).Returns(["TestNode"]);
         var otherNodeIds = new List<string> { "node1", "node2", "node3" };
         transport.GetOtherNodeIds("leaderNode").Returns(otherNodeIds);
 
@@ -437,6 +442,7 @@ public class RaftNodeTests
     ///
     ///
     ///
+    //#15.a
     [Fact]
     public async Task SendAppendEntriesAsync_IncludesPrevLogIndexAndTerm()
     {
@@ -445,10 +451,14 @@ public class RaftNodeTests
         var transport = Substitute.For<ITransport>();
         var stateMachine = Substitute.For<IStateMachine>();
 
+        transport.GetOtherNodeIds(Arg.Any<string>()).Returns(["TestNode"]);
         var leader = new RaftNode("leader1", NodeState.Leader, clock, transport, stateMachine);
+
+        Assert.Equal(leader._nextIndex["TestNode"], 0);
 
         leader.GetLog().Add(new LogEntry { Term = 1, Command = "command1" });
         leader.GetLog().Add(new LogEntry { Term = 1, Command = "command2" });
+
 
         // Act
         await leader.SendHeartbeatAsync();
@@ -456,10 +466,10 @@ public class RaftNodeTests
         // Assert
         await transport.Received().SendAppendEntriesAsync(
             Arg.Is<AppendEntries>(ae =>
-                ae.PrevLogIndex == 1 && 
-                ae.PrevLogTerm == 1),  
-            Arg.Any<string>());
+                ae.PrevLogIndex ==-1),  
+            Arg.Is<string>(s=> s == "TestNode"));
     }
+    //15.b
     [Fact]
     public async Task ReceiveAppendEntriesAsync_RejectsIfPrevLogIndexAndTermDoNotMatch()
     {
@@ -476,8 +486,8 @@ public class RaftNodeTests
         {
             LeaderId = "leader1",
             Term = 2,
-            PrevLogIndex = 1, 
-            PrevLogTerm = 2, 
+            PrevLogIndex = 1,
+            PrevLogTerm = 2,
             LeaderCommit = 1,
             LogEntries = new List<LogEntry>
         {
@@ -491,9 +501,10 @@ public class RaftNodeTests
         // Assert
         Assert.False(follower.LastAppendEntriesAccepted);
         await transport.Received().SendAppendEntriesResponseAsync(
-            Arg.Is<AppendEntriesResponse>(r => !r.Success && r.Term == 1),
+            Arg.Is<AppendEntriesResponse>(r => !r.Success ),
             "leader1");
     }
+    //15.c
     [Fact]
     public async Task ReceiveAppendEntriesResponseAsync_DecrementsNextIndexAndRetries()
     {
@@ -527,6 +538,7 @@ public class RaftNodeTests
                 ae.PrevLogTerm == 1),
             "follower1");
     }
+    //15.d
     [Fact]
     public async Task ReceiveAppendEntriesAsync_AcceptsIfPrevLogIndexAndTermMatch()
     {
@@ -562,8 +574,6 @@ public class RaftNodeTests
             Arg.Is<AppendEntriesResponse>(r => r.Success && r.Term == 2),
             "leader1");
     }
-
-
 
     ////
     //#16
@@ -722,41 +732,42 @@ public class RaftNodeTests
         Assert.Equal(1, followerNode.Term);
     }
     //#20
-    //[Fact]
-    //public async Task ReceiveAppendEntriesAsync_WithMismatchedTermAndIndex_RejectsRequest()
-    //{
-    //    // Arrange
-    //    var clock = Substitute.For<IClock>();
-    //    var transport = Substitute.For<ITransport>();
-    //    var stateMachine = Substitute.For<IStateMachine>();
+    [Fact]
+    public async Task ReceiveAppendEntriesAsync_WithMismatchedTermAndIndex_RejectsRequest()
+    {
+        // Arrange
+        var clock = Substitute.For<IClock>();
+        var transport = Substitute.For<ITransport>();
+        var stateMachine = Substitute.For<IStateMachine>();
 
-    //    var node = new RaftNode("node1", NodeState.Follower, clock, transport, stateMachine);
+        transport.GetOtherNodeIds(Arg.Any<string>()).Returns(["TestNode"]);
+        var node = new RaftNode("node1", NodeState.Follower, clock, transport, stateMachine);
 
-    //    node.GetLog().Add(new LogEntry { Term = 1, Command = "command1" });
-    //    node.GetLog().Add(new LogEntry { Term = 1, Command = "command2" });
+        node.GetLog().Add(new LogEntry { Term = 1, Command = "command1" });
+        node.GetLog().Add(new LogEntry { Term = 1, Command = "command2" });
 
-    //    var appendEntries = new AppendEntries
-    //    {
-    //        LeaderId = "leader1",
-    //        Term = 2, 
-    //        PrevLogIndex = 2,
-    //        PrevLogTerm = 1,
-    //        LeaderCommit = 1,
-    //        LogEntries = new List<LogEntry>
-    //    {
-    //        new LogEntry { Term = 2, Command = "command3" }
-    //    }
-    //    };
+        var appendEntries = new AppendEntries
+        {
+            LeaderId = "leader1",
+            Term = 2,
+            PrevLogIndex = 2,
+            PrevLogTerm = 1,
+            LeaderCommit = 1,
+            LogEntries = new List<LogEntry>
+        {
+            new LogEntry { Term = 2, Command = "command3" }
+        }
+        };
 
-    //    // Act
-    //    await node.ReceiveAppendEntriesAsync(appendEntries);
+        // Act
+        await node.ReceiveAppendEntriesAsync(appendEntries);
 
-    //    // Assert
-    //    Assert.False(node.LastAppendEntriesAccepted); 
-    //    Assert.Equal(2, node.GetLog().Count);
-    //    await transport.Received().SendAppendEntriesResponseAsync(
-    //        Arg.Is<AppendEntriesResponse>(r => !r.Success && r.Term == 1), 
-    //        "leader1");
-    //}
+        // Assert
+        Assert.False(node.LastAppendEntriesAccepted);
+        Assert.Equal(2, node.GetLog().Count);
+        await transport.Received().SendAppendEntriesResponseAsync(
+            Arg.Is<AppendEntriesResponse>(r => !r.Success),
+            "leader1");
+    }
 
 }
