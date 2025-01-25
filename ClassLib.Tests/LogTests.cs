@@ -135,14 +135,14 @@ public class RaftNodeTests
         var transport = Substitute.For<ITransport>();
         var stateMachine = Substitute.For<IStateMachine>();
 
-        transport.GetOtherNodeIds(Arg.Any<string>()).Returns(["TestNode","node1"]);
+        var otherNodeIds = new List<string> { "node1", "node2" };
+        transport.GetOtherNodeIds(Arg.Any<string>()).Returns(otherNodeIds);
 
         var leader = new RaftNode("leaderNode", NodeState.Leader, clock, transport, stateMachine);
 
-        Assert.Equal(0, leader._nextIndex["TestNode"]);
-
-        var otherNodeIds = new List<string> { "node1", "node2" };
-        transport.GetOtherNodeIds("leaderNode").Returns(otherNodeIds);
+        Assert.Equal(2, leader._nextIndex.Count);
+        Assert.Equal(0, leader._nextIndex["node1"]);
+        Assert.Equal(0, leader._nextIndex["node2"]);
 
         leader.GetLog().Add(new LogEntry { Term = 0, Command = "command1" });
         leader.GetLog().Add(new LogEntry { Term = 0, Command = "command2" });
@@ -170,7 +170,6 @@ public class RaftNodeTests
                 ae.LeaderCommit == 2),
             "node2");
     }
-
     //#7
     [Fact]
     public async Task Follower_AppliesCommittedEntries_ToStateMachine()
@@ -331,16 +330,21 @@ public class RaftNodeTests
         var clock = Substitute.For<IClock>();
         var transport = Substitute.For<ITransport>();
         var stateMachine = new SimpleStateMachine();
+
+        var otherNodeIds = new List<string> { "node1", "node2", "node3" };
+        transport.GetOtherNodeIds(Arg.Any<string>()).Returns(otherNodeIds);
+
         var node = new RaftNode("leaderNode", NodeState.Leader, clock, transport, stateMachine);
 
-        transport.GetOtherNodeIds(Arg.Any<string>()).Returns(["TestNode"]);
-        var otherNodeIds = new List<string> { "node1", "node2", "node3" };
-        transport.GetOtherNodeIds("leaderNode").Returns(otherNodeIds);
-
-        bool confirmationReceived = false;
+        Assert.Equal(3, node.NextIndex.Count);
+        Assert.Equal(0, node.NextIndex["node1"]);
+        Assert.Equal(0, node.NextIndex["node2"]);
+        Assert.Equal(0, node.NextIndex["node3"]);
 
         transport.SendAppendEntriesAsync(Arg.Any<AppendEntries>(), Arg.Any<string>())
             .Returns(new AppendEntriesResponse { Success = true });
+
+        bool confirmationReceived = false;
 
         // Act
         await node.ReceiveClientCommandAsync("command1", success =>
@@ -349,10 +353,10 @@ public class RaftNodeTests
         });
 
         // Assert
-        Assert.True(confirmationReceived); 
+        Assert.True(confirmationReceived);
         Assert.Equal(1, node.CommitIndex); 
         Assert.Single(stateMachine.AppliedCommands);
-        Assert.Equal("command1", stateMachine.AppliedCommands[0]); 
+        Assert.Equal("command1", stateMachine.AppliedCommands[0]);
     }
     //#13
     [Fact]
