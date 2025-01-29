@@ -179,19 +179,20 @@ public class RaftNode
                         _nextIndex[followerId] = Math.Max(0, _nextIndex[followerId] - 1);
                     }
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    Console.WriteLine($"Error replicating log to {followerId}: {ex.Message}");
                     continue;
                 }
             }
 
-            
             _log.RemoveAt(_log.Count - 1);
             onCommitConfirmed?.Invoke(false);
             return false;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Console.WriteLine($"Error in ReceiveClientCommandAsync: {ex.Message}");
             onCommitConfirmed?.Invoke(false);
             return false;
         }
@@ -259,7 +260,7 @@ public class RaftNode
     //    }
     //}
 
-    
+
     //public async Task ReceiveClientCommandAsync(string command, Action<bool> onCommitConfirmed = null)
     //{
     //    if (Paused == false)
@@ -368,8 +369,9 @@ public class RaftNode
                     _nextIndex[followerId] = Math.Max(0, _nextIndex[followerId] - 1);
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine($"Error sending heartbeat to {followerId}: {ex.Message}");
                 continue;
             }
         }
@@ -597,11 +599,11 @@ public class RaftNode
         Term++;
         LastVoteCandidateId = NodeId;
         LastVoteGranted = true;
-        CurrentLeaderId = null;  
+        CurrentLeaderId = null;
 
-        ResetElectionTimer(); 
+        ResetElectionTimer();
 
-        int votesReceived = 1; 
+        int votesReceived = 1;
         var otherNodes = _transport.GetOtherNodeIds(NodeId).ToList();
         int majorityNeeded = (otherNodes.Count + 1) / 2 + 1;
 
@@ -621,8 +623,9 @@ public class RaftNode
                 {
                     return await _transport.SendVoteRequestAsync(voteRequest, nodeId);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Console.WriteLine($"Error sending vote request to {nodeId}: {ex.Message}");
                     return false;
                 }
             }).ToList();
@@ -639,7 +642,7 @@ public class RaftNode
 
                 if (votesReceived >= majorityNeeded)
                 {
-                    if (State == NodeState.Candidate)  
+                    if (State == NodeState.Candidate)
                     {
                         State = NodeState.Leader;
                         CurrentLeaderId = NodeId;
@@ -663,8 +666,9 @@ public class RaftNode
                 ResetElectionTimer();
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"Error in StartElection: {ex.Message}");
             if (State == NodeState.Candidate)
             {
                 State = NodeState.Follower;
