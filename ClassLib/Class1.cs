@@ -122,6 +122,7 @@ public class RaftNode
     {
         if (State != NodeState.Leader || Paused)
         {
+            Console.WriteLine("Node is not the leader or is paused.");
             onCommitConfirmed?.Invoke(false);
             return false;
         }
@@ -171,12 +172,14 @@ public class RaftNode
                             _commitIndex = newEntryIndex;
                             await ApplyCommittedEntriesAsync();
                             onCommitConfirmed?.Invoke(true);
+                            Console.WriteLine("Command committed successfully.");
                             return true;
                         }
                     }
                     else
                     {
                         _nextIndex[followerId] = Math.Max(0, _nextIndex[followerId] - 1);
+                        Console.WriteLine($"Replication failed for follower {followerId}.");
                     }
                 }
                 catch (Exception ex)
@@ -188,6 +191,7 @@ public class RaftNode
 
             _log.RemoveAt(_log.Count - 1);
             onCommitConfirmed?.Invoke(false);
+            Console.WriteLine("Command failed to commit.");
             return false;
         }
         catch (Exception ex)

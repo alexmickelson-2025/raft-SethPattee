@@ -119,16 +119,20 @@
         var node = Nodes[nodeId];
         var key = CommandKeys[nodeId];
         var value = CommandValues[nodeId];
-        
+
         if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(value))
+        {
+            Console.WriteLine("Key or Value is empty.");
             return;
+        }
 
         var command = $"SET {key} {value}";
         bool success = false;
 
         if (node.State == NodeState.Leader)
         {
-            await node.ReceiveClientCommandAsync(command, (committed) => 
+            Console.WriteLine($"Node {nodeId} is the leader. Sending command: {command}");
+            await node.ReceiveClientCommandAsync(command, (committed) =>
             {
                 success = committed;
                 CommandResponses[nodeId] = committed;
@@ -137,14 +141,16 @@
         }
         else
         {
+            Console.WriteLine($"Node {nodeId} is not the leader. Current leader: {node.CurrentLeaderId ?? "None"}");
             CommandResponses[nodeId] = false;
         }
 
         CommandKeys[nodeId] = "";
         CommandValues[nodeId] = "";
-        
+
         await InvokeAsync(StateHasChanged);
     }
+
     private void OnNetworkDelayChanged(ChangeEventArgs e)
     {
         if (int.TryParse(e.Value?.ToString(), out int newDelay))
@@ -154,6 +160,7 @@
             {
                 transport.SetNetworkDelay(NetworkDelay);
             }
+            Console.WriteLine($"Network delay set to: {NetworkDelay} ms");
         }
     }
 
@@ -269,14 +276,15 @@
             CommandResponses[nodeId] = false;
 
             stateMachine.OnCommandApplied += (command) =>
-            {
-                if (!StateMachineStates.ContainsKey(nodeId))
-                {
-                    StateMachineStates[nodeId] = new List<string>();
-                }
-                StateMachineStates[nodeId].Add(command);
-                InvokeAsync(StateHasChanged);
-            };
+             {
+             if (!StateMachineStates.ContainsKey(nodeId))
+             {
+                 StateMachineStates[nodeId] = new List<string>();
+             }
+             StateMachineStates[nodeId].Add(command);
+             Console.WriteLine($"Command applied to state machine: {command}");
+             InvokeAsync(StateHasChanged);
+             };
         }
         NodeTransports["main"] = transport;
     }
