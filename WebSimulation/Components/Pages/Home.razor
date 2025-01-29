@@ -4,17 +4,79 @@
 
 <h3>Raft Simulation</h3>
 
-<div>
-    <h4>Nodes</h4>
+<div class="grid">
     @foreach (var node in Nodes)
     {
         <div style="border: 1px solid black; margin: 5px; padding: 5px;">
-            <p><strong>Node:</strong> @node.Key</p>
-            <p><strong>State:</strong> @node.Value.State</p>
-            <p><strong>Term:</strong> @node.Value.Term</p>
-            <p><strong>Leader:</strong> @(node.Value.CurrentLeaderId ?? "None")</p>
-            <p><strong>Election Timeout:</strong> @node.Value.ElectionTimeout ms</p>
-            <p><strong>Timeout Remaining:</strong> @TimeoutRemaining[node.Key] ms</p>
+            <h4>Node: @node.Key</h4>
+            <div>
+                <p><strong>State:</strong> @node.Value.State</p>
+                <p><strong>Term:</strong> @node.Value.Term</p>
+                <p><strong>Leader:</strong> @(node.Value.CurrentLeaderId ?? "None")</p>
+                <p><strong>Election Timeout:</strong> @node.Value.ElectionTimeout ms</p>
+                <p><strong>Timeout Remaining:</strong> @TimeoutRemaining[node.Key] ms</p>
+                <p><strong>Commit Index:</strong> @node.Value.CommitIndex</p>
+            </div>
+
+            <div style="margin-top: 10px;">
+                <h5>State Machine Commands</h5>
+                @if (StateMachineStates.ContainsKey(node.Key))
+                {
+                    <ul style="max-height: 100px; overflow-y: auto;">
+                        @foreach (var command in StateMachineStates[node.Key])
+                        {
+                            <li>@command</li>
+                        }
+                    </ul>
+                }
+            </div>
+
+            <div style="margin-top: 10px;">
+                <h5>Log Entries</h5>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr>
+                            <th style="border: 1px solid #ddd; padding: 4px;">Index</th>
+                            <th style="border: 1px solid #ddd; padding: 4px;">Term</th>
+                            <th style="border: 1px solid #ddd; padding: 4px;">Command</th>
+                            <th style="border: 1px solid #ddd; padding: 4px;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @{
+                            var log = node.Value.GetLog();
+                            for (int i = 0; i < log.Count; i++)
+                            {
+                                var entry = log[i];
+                                var isCommitted = i <= node.Value.CommitIndex;
+                                <tr>
+                                    <td style="border: 1px solid #ddd; padding: 4px;">@i</td>
+                                    <td style="border: 1px solid #ddd; padding: 4px;">@entry.Term</td>
+                                    <td style="border: 1px solid #ddd; padding: 4px;">@entry.Command</td>
+                                    <td style="border: 1px solid #ddd; padding: 4px; @(isCommitted ? "color: green" : "color: orange")">
+                                        @(isCommitted ? "Committed" : "Pending")
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="margin-top: 10px;">
+                <h5>Send Command</h5>
+                <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                    <input @bind="CommandKeys[node.Key]" placeholder="Key" style="flex: 1;" />
+                    <input @bind="CommandValues[node.Key]" placeholder="Value" style="flex: 1;" />
+                    <button @onclick="() => SendSetCommand(node.Key)" style="width: 80px;">Send</button>
+                </div>
+                @if (CommandResponses.ContainsKey(node.Key))
+                {
+                    <div style="font-size: 0.9em; color: @(CommandResponses[node.Key] ? "green" : "red")">
+                        Response: @(CommandResponses[node.Key] ? "Success" : "Failed")
+                    </div>
+                }
+            </div>
         </div>
     }
 </div>
@@ -27,10 +89,15 @@
     <label>Election Timeout Multiplier: @TimeoutMultiplier</label>
     <input type="range" min="1" max="5" step="0.1" value="@TimeoutMultiplier" @oninput="OnTimeoutMultiplierChanged" />
 </div>
+
 @code {
     private Dictionary<string, RaftNode> Nodes = new();
-    private Dictionary<string, MockTransport> NodeTransports = new(); 
+    private Dictionary<string, MockTransport> NodeTransports = new();
     private Dictionary<string, int> TimeoutRemaining = new();
+    private Dictionary<string, List<string>> StateMachineStates = new();
+    private Dictionary<string, string> CommandKeys = new();
+    private Dictionary<string, string> CommandValues = new();
+    private Dictionary<string, bool> CommandResponses = new();
     private int NetworkDelay = 0;
     private double TimeoutMultiplier = 1.0;
     private Timer? _visualizationTimer;
@@ -38,8 +105,7 @@
     protected override void OnInitialized()
     {
         InitializeNodes();
-
-       
+        
         _visualizationTimer = new Timer(100);
         _visualizationTimer.Elapsed += UpdateTimeouts;
         _visualizationTimer.Start();
@@ -47,28 +113,98 @@
         StartSimulation();
     }
 
-    private void InitializeNodes()
+
+    private async Task SendSetCommand(string nodeId)
     {
-        var transport = new MockTransport(NetworkDelay);
-        for (int i = 1; i <= 5; i++)
+        var node = Nodes[nodeId];
+        var key = CommandKeys[nodeId];
+        var value = CommandValues[nodeId];
+        
+        if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(value))
+            return;
+
+        var command = $"SET {key} {value}";
+        bool success = false;
+
+        if (node.State == NodeState.Leader)
         {
-            string nodeId = $"Node-{i}";
-            var clock = new SystemClock();
-            var node = new RaftNode(nodeId, clock, transport);
-            Nodes[nodeId] = node;
-            transport.AddNode(node);
-            TimeoutRemaining[nodeId] = node.ElectionTimeout;
+            await node.ReceiveClientCommandAsync(command, (committed) => 
+            {
+                success = committed;
+                CommandResponses[nodeId] = committed;
+                InvokeAsync(StateHasChanged);
+            });
         }
-        NodeTransports["main"] = transport;
+        else
+        {
+            CommandResponses[nodeId] = false;
+        }
+
+        CommandKeys[nodeId] = "";
+        CommandValues[nodeId] = "";
+        
+        await InvokeAsync(StateHasChanged);
+    }
+    private void OnNetworkDelayChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int newDelay))
+        {
+            NetworkDelay = newDelay;
+            foreach (var transport in NodeTransports.Values)
+            {
+                transport.SetNetworkDelay(NetworkDelay);
+            }
+        }
     }
 
+    private void OnTimeoutMultiplierChanged(ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), out double newMultiplier))
+        {
+            TimeoutMultiplier = newMultiplier;
+            foreach (var node in Nodes.Values)
+            {
+                node.ResetElectionTimer();
+                node.ElectionTimeout = (int)(node.ElectionTimeout * TimeoutMultiplier);
+            }
+        }
+    }
 
+    private void UpdateTimeouts(object? sender, ElapsedEventArgs e)
+    {
+        foreach (var node in Nodes)
+        {
+            if (node.Value.State == NodeState.Follower)
+            {
+                TimeoutRemaining[node.Key] = Math.Max(0, TimeoutRemaining[node.Key] - 100);
+                if (TimeoutRemaining[node.Key] <= 0)
+                {
+                    ResetNodeTimeout(node.Key);
+                    node.Value._electionTimerExpired = true;
+                }
+            }
+            else if (node.Value.State == NodeState.Leader)
+            {
+                TimeoutRemaining[node.Key] = node.Value.ElectionTimeout;
+            }
+        }
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void ResetNodeTimeout(string nodeId)
+    {
+        
+        if (TimeoutRemaining.ContainsKey(nodeId))
+        {
+            TimeoutRemaining[nodeId] = Nodes[nodeId].ElectionTimeout;
+        }
+    }
 
     private void StartSimulation()
     {
         foreach (var node in Nodes.Values)
         {
-            SimulateNodeBehavior(node);
+            _ = SimulateNodeBehavior(node);
         }
     }
 
@@ -113,52 +249,41 @@
         }
     }
 
-    private void ResetNodeTimeout(string nodeId)
+    private void InitializeNodes()
     {
-        if (TimeoutRemaining.ContainsKey(nodeId))
-        {
-            TimeoutRemaining[nodeId] = Nodes[nodeId].ElectionTimeout;
-        }
-    }
+        var transport = new MockTransport();
+        transport.SetNetworkDelay(NetworkDelay);
 
-    private void UpdateTimeouts(object? sender, ElapsedEventArgs e)
-    {
-        foreach (var node in Nodes)
+        for (int i = 1; i <= 5; i++)
         {
-            if (node.Value.State == NodeState.Follower)
+            string nodeId = $"Node-{i}";
+            var clock = new SystemClock();
+            var stateMachine = new SimpleStateMachine();
+            var node = new RaftNode(nodeId, NodeState.Follower, clock, transport, stateMachine);
+            Nodes[nodeId] = node;
+            transport.AddNode(node);
+            TimeoutRemaining[nodeId] = node.ElectionTimeout;
+            StateMachineStates[nodeId] = new List<string>();
+            CommandKeys[nodeId] = "";
+            CommandValues[nodeId] = "";
+            CommandResponses[nodeId] = false;
+
+            stateMachine.OnCommandApplied += (command) =>
             {
-                TimeoutRemaining[node.Key] = Math.Max(0, TimeoutRemaining[node.Key] - 100);
-                if (TimeoutRemaining[node.Key] <= 0)
+                if (!StateMachineStates.ContainsKey(nodeId))
                 {
-                    ResetNodeTimeout(node.Key);
-                    node.Value._electionTimerExpired = true;
+                    StateMachineStates[nodeId] = new List<string>();
                 }
-            }
-            else if (node.Value.State == NodeState.Leader)
-            {
-                TimeoutRemaining[node.Key] = node.Value.ElectionTimeout;
-            }
+                StateMachineStates[nodeId].Add(command);
+                InvokeAsync(StateHasChanged);
+            };
         }
-        InvokeAsync(StateHasChanged);
+        NodeTransports["main"] = transport;
     }
 
-    private void OnNetworkDelayChanged(ChangeEventArgs e)
+    public void Dispose()
     {
-        NetworkDelay = int.Parse(e.Value?.ToString() ?? "0");
-        foreach (var transport in NodeTransports.Values)
-        {
-            transport.SetNetworkDelay(NetworkDelay);
-        }
+        _visualizationTimer?.Dispose();
     }
 
-    private void OnTimeoutMultiplierChanged(ChangeEventArgs e)
-    {
-        TimeoutMultiplier = double.Parse(e.Value?.ToString() ?? "1.0");
-        foreach (var node in Nodes.Values)
-        {
-            node.ResetElectionTimer();
-            node.ElectionTimeout = (int)(node.ElectionTimeout * TimeoutMultiplier);
-        }
-    }
 }
-

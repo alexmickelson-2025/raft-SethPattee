@@ -15,9 +15,14 @@ public class MockTransport : ITransport
     private readonly Dictionary<string, RaftNode> _nodes = new();
     private int _networkDelay;
 
-    public MockTransport(int initialDelay)
+    public MockTransport()
     {
-        _networkDelay = initialDelay;
+        _networkDelay = 0;
+    }
+
+    public void SetNetworkDelay(int milliseconds)
+    {
+        _networkDelay = milliseconds;
     }
 
     public void AddNode(RaftNode node)
@@ -30,51 +35,55 @@ public class MockTransport : ITransport
         return _nodes.Keys.Where(id => id != currentNodeId);
     }
 
-    public async Task SendAppendEntriesAsync(AppendEntries entries, string recipientNodeId)
+    public async Task<AppendEntriesResponse> SendAppendEntriesAsync(AppendEntries entries, string recipientNodeId)
     {
-        await Task.Delay(_networkDelay);
-        if (_nodes.TryGetValue(recipientNodeId, out var recipientNode))
+        if (_networkDelay > 0)
         {
-            recipientNode.ReceiveAppendEntries(entries);
+            await Task.Delay(_networkDelay);
         }
+
+        if (!_nodes.TryGetValue(recipientNodeId, out var recipientNode))
+        {
+            throw new InvalidOperationException($"Node {recipientNodeId} not found");
+        }
+
+        await recipientNode.ReceiveAppendEntriesAsync(entries);
+        return new AppendEntriesResponse
+        {
+            Success = recipientNode.LastAppendEntriesAccepted,
+            Term = recipientNode.Term,
+            LastLogIndex = recipientNode.GetLog().Count - 1
+        };
     }
 
     public async Task<bool> SendVoteRequestAsync(VoteRequest request, string recipientNodeId)
     {
-        await Task.Delay(_networkDelay);
-        if (_nodes.TryGetValue(recipientNodeId, out var recipientNode))
+        if (_networkDelay > 0)
         {
-            recipientNode.ReceiveVoteRequest(request);
-            return recipientNode.LastVoteGranted;
+            await Task.Delay(_networkDelay);
         }
-        return false;
-    }
 
-    public async Task<AppendEntriesResponse> SendAppendEntriesResponseAsync(AppendEntriesResponse response, string recipientNodeId)
-    {
-        await Task.Delay(_networkDelay);
-        if (_nodes.TryGetValue(recipientNodeId, out var recipientNode))
+        if (!_nodes.TryGetValue(recipientNodeId, out var recipientNode))
         {
-            if (response.Success)
-            {
-                recipientNode.ResetElectionTimer();
-            }
+            throw new InvalidOperationException($"Node {recipientNodeId} not found");
         }
-        return response; 
+
+        recipientNode.ReceiveVoteRequest(request);
+        return recipientNode.LastVoteGranted;
     }
 
-    public void SetNetworkDelay(int delay)
+    public async Task SendAppendEntriesResponseAsync(AppendEntriesResponse response, string recipientNodeId)
     {
-        _networkDelay = delay;
-    }
+        if (_networkDelay > 0)
+        {
+            await Task.Delay(_networkDelay);
+        }
 
-    Task ITransport.SendAppendEntriesResponseAsync(AppendEntriesResponse response, string recipientNodeId)
-    {
-        throw new NotImplementedException();
-    }
+        if (!_nodes.TryGetValue(recipientNodeId, out var recipientNode))
+        {
+            throw new InvalidOperationException($"Node {recipientNodeId} not found");
+        }
 
-    Task<AppendEntriesResponse> ITransport.SendAppendEntriesAsync(AppendEntries entries, string recipientNodeId)
-    {
-        throw new NotImplementedException();
+        await recipientNode.ReceiveAppendEntriesResponseAsync(response, recipientNode.NodeId);
     }
 }
