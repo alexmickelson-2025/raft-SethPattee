@@ -9,6 +9,16 @@
     {
         <div style="border: 1px solid black; margin: 5px; padding: 5px;">
             <h4>Node: @node.Key</h4>
+            <div style="margin-top: 10px;">
+                <button @onclick="() => node.Value.PauseNode()"
+                        disabled="@node.Value.Paused">
+                    Pause Node
+                </button>
+                <button @onclick="() => node.Value.ResumeNode()"
+                        disabled="@(!node.Value.Paused)">
+                    Resume Node
+                </button>
+            </div>
             <div>
                 <p><strong>State:</strong> @node.Value.State</p>
                 <p><strong>Term:</strong> @node.Value.Term</p>

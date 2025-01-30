@@ -9,13 +9,12 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ClassLib.Tests", "ClassLib.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebSimulation", "WebSimulation\WebSimulation.csproj", "{A61DDDD2-EB15-4076-A9BC-513535524F75}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RaftWeb", "RaftWeb\RaftWeb.csproj", "{BCA0B8F2-D267-4743-AD68-81D96F07EA73}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
 		Release|Any CPU = Release|Any CPU
-	EndGlobalSection
-	GlobalSection(SolutionProperties) = preSolution
-		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{00C280B7-B898-4791-8469-251F64BB0D59}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
@@ -30,5 +29,12 @@ Global
 		{A61DDDD2-EB15-4076-A9BC-513535524F75}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A61DDDD2-EB15-4076-A9BC-513535524F75}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A61DDDD2-EB15-4076-A9BC-513535524F75}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BCA0B8F2-D267-4743-AD68-81D96F07EA73}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BCA0B8F2-D267-4743-AD68-81D96F07EA73}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BCA0B8F2-D267-4743-AD68-81D96F07EA73}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BCA0B8F2-D267-4743-AD68-81D96F07EA73}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
 	EndGlobalSection
 EndGlobal
