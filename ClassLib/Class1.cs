@@ -61,6 +61,8 @@ public class RaftNode
 
     private const int HeartbeatInterval = 150;
 
+    public event Action<string, bool, string> OnCommandResponse;
+
 
     public RaftNode(string nodeId, IClock clock, ITransport transport)
     {
@@ -120,11 +122,52 @@ public class RaftNode
     }
     public async Task<bool> ReceiveClientCommandAsync(string command, Action<bool> onCommitConfirmed = null)
     {
-        if (State != NodeState.Leader || Paused)
+        if (Paused)
         {
-            Console.WriteLine($"Node {NodeId} is not the leader or is paused.");
+            OnCommandResponse?.Invoke(NodeId, false, "Node is paused");
             onCommitConfirmed?.Invoke(false);
             return false;
+        }
+
+        if (State != NodeState.Leader)
+        {
+            if (string.IsNullOrEmpty(CurrentLeaderId))
+            {
+                OnCommandResponse?.Invoke(NodeId, false, "No leader currently known");
+                onCommitConfirmed?.Invoke(false);
+                return false;
+            }
+
+            try
+            {
+                var appendEntries = new AppendEntries
+                {
+                    Term = Term,
+                    LeaderId = CurrentLeaderId,
+                    LogEntries = new List<LogEntry> { new LogEntry { Term = Term, Command = command } }
+                };
+
+                var response = await _transport.SendAppendEntriesAsync(appendEntries, CurrentLeaderId);
+
+                if (response.Success)
+                {
+                    OnCommandResponse?.Invoke(NodeId, true, $"Command forwarded to leader {CurrentLeaderId}");
+                    onCommitConfirmed?.Invoke(true);
+                    return true;
+                }
+                else
+                {
+                    OnCommandResponse?.Invoke(NodeId, false, $"Leader {CurrentLeaderId} rejected the command");
+                    onCommitConfirmed?.Invoke(false);
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                OnCommandResponse?.Invoke(NodeId, false, $"Error forwarding command: {ex.Message}");
+                onCommitConfirmed?.Invoke(false);
+                return false;
+            }
         }
 
         try
@@ -143,14 +186,14 @@ public class RaftNode
 
             if (commitSuccessful)
             {
-                Console.WriteLine($"Leader {NodeId}: Successfully committed entry {newEntryIndex}");
+                OnCommandResponse?.Invoke(NodeId, true, "Command committed successfully");
                 onCommitConfirmed?.Invoke(true);
                 return true;
             }
             else if (State == NodeState.Leader)
             {
-                _log.RemoveAt(_log.Count - 1); 
-                Console.WriteLine($"Leader {NodeId}: Failed to replicate entry {newEntryIndex}, rolling back");
+                _log.RemoveAt(_log.Count - 1);
+                OnCommandResponse?.Invoke(NodeId, false, "Failed to replicate command");
                 onCommitConfirmed?.Invoke(false);
             }
 
@@ -158,7 +201,7 @@ public class RaftNode
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error in ReceiveClientCommandAsync: {ex.Message}");
+            OnCommandResponse?.Invoke(NodeId, false, $"Error processing command: {ex.Message}");
             onCommitConfirmed?.Invoke(false);
             return false;
         }
@@ -250,57 +293,6 @@ public class RaftNode
         }
 
         return false;
-    }
-
-
-    private async Task ReplicateToFollowerAsync(string followerId, int newEntryIndex, Dictionary<string, bool> replicationStatus)
-    {
-        try
-        {
-            var prevLogIndex = _nextIndex[followerId] - 1;
-            var prevLogTerm = prevLogIndex >= 0 && prevLogIndex < _log.Count
-                ? _log[prevLogIndex].Term
-                : -1;
-
-            var entriesToSend = _log
-                .Skip(_nextIndex[followerId])
-                .ToList();
-
-            var appendEntries = new AppendEntries
-            {
-                Term = Term,
-                LeaderId = NodeId,
-                PrevLogIndex = prevLogIndex,
-                PrevLogTerm = prevLogTerm,
-                LeaderCommit = _commitIndex,
-                LogEntries = entriesToSend
-            };
-
-            var response = await _transport.SendAppendEntriesAsync(appendEntries, followerId);
-
-            if (response.Success)
-            {
-                _nextIndex[followerId] = newEntryIndex + 1;
-                replicationStatus[followerId] = true;
-                Console.WriteLine($"Leader {NodeId}: Successful replication to {followerId} for index {newEntryIndex}");
-            }
-            else if (response.Term > Term)
-            {
-                Term = response.Term;
-                State = NodeState.Follower;
-                CurrentLeaderId = null;
-                Console.WriteLine($"Node {NodeId}: Stepping down, found higher term from {followerId}");
-            }
-            else
-            {
-                _nextIndex[followerId] = Math.Max(0, _nextIndex[followerId] - 1);
-                Console.WriteLine($"Leader {NodeId}: Failed replication to {followerId}, decremented nextIndex to {_nextIndex[followerId]}");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error replicating to {followerId}: {ex.Message}");
-        }
     }
 
 
@@ -420,61 +412,6 @@ public class RaftNode
             }
         }
     }
-    private async Task SendHeartbeatToFollowerAsync(string followerId)
-    {
-        try
-        {
-            if (!_nextIndex.ContainsKey(followerId))
-            {
-                _nextIndex[followerId] = _log.Count;
-                return;
-            }
-
-            var prevLogIndex = _nextIndex[followerId] - 1;
-            var prevLogTerm = prevLogIndex >= 0 && prevLogIndex < _log.Count
-                ? _log[prevLogIndex].Term
-                : -1;
-
-            var entriesToSend = _log
-                .Skip(_nextIndex[followerId])
-                .ToList();
-
-            var appendEntries = new AppendEntries
-            {
-                Term = Term,
-                LeaderId = NodeId,
-                PrevLogIndex = prevLogIndex,
-                PrevLogTerm = prevLogTerm,
-                LeaderCommit = _commitIndex,
-                LogEntries = entriesToSend
-            };
-
-            var response = await _transport.SendAppendEntriesAsync(appendEntries, followerId);
-
-            if (response.Success)
-            {
-                _nextIndex[followerId] = Math.Max(_nextIndex[followerId], response.LastLogIndex + 1);
-            }
-            else if (response.Term > Term)
-            {
-                Term = response.Term;
-                State = NodeState.Follower;
-                CurrentLeaderId = null;
-                return;
-            }
-            else
-            {
-                _nextIndex[followerId] = Math.Max(0, _nextIndex[followerId] - 1);
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error sending heartbeat to {followerId}: {ex.Message}");
-        }
-    }
-
-
-
 
     public void ReceiveAppendEntries(AppendEntries appendEntries)
     {

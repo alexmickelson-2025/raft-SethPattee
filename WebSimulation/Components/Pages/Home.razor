@@ -82,8 +82,8 @@
                 </div>
                 @if (CommandResponses.ContainsKey(node.Key))
                 {
-                    <div style="font-size: 0.9em; color: @(CommandResponses[node.Key] ? "green" : "red")">
-                        Response: @(CommandResponses[node.Key] ? "Success" : "Failed")
+                    <div style="font-size: 0.9em; color: @(CommandResponses[node.Key].Success ? "green" : "red")">
+                        @CommandResponses[node.Key].Message
                     </div>
                 }
             </div>
@@ -107,10 +107,11 @@
     private Dictionary<string, List<string>> StateMachineStates = new();
     private Dictionary<string, string> CommandKeys = new();
     private Dictionary<string, string> CommandValues = new();
-    private Dictionary<string, bool> CommandResponses = new();
+    // private Dictionary<string, bool> CommandResponses = new();
     private int NetworkDelay = 0;
     private double TimeoutMultiplier = 1.0;
     private Timer? _visualizationTimer;
+    private Dictionary<string, CommandResponse> CommandResponses = new();
 
     protected override void OnInitialized()
     {
@@ -132,28 +133,17 @@
 
         if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(value))
         {
-            Console.WriteLine("Key or Value is empty.");
+            CommandResponses[nodeId] = new CommandResponse
+                {
+                    Success = false,
+                    Message = "Key or Value cannot be empty"
+                };
+            await InvokeAsync(StateHasChanged);
             return;
         }
 
         var command = $"SET {key} {value}";
-        bool success = false;
-
-        if (node.State == NodeState.Leader)
-        {
-            Console.WriteLine($"Node {nodeId} is the leader. Sending command: {command}");
-            await node.ReceiveClientCommandAsync(command, (committed) =>
-            {
-                success = committed;
-                CommandResponses[nodeId] = committed;
-                InvokeAsync(StateHasChanged);
-            });
-        }
-        else
-        {
-            Console.WriteLine($"Node {nodeId} is not the leader. Current leader: {node.CurrentLeaderId ?? "None"}");
-            CommandResponses[nodeId] = false;
-        }
+        await node.ReceiveClientCommandAsync(command);
 
         CommandKeys[nodeId] = "";
         CommandValues[nodeId] = "";
@@ -277,13 +267,20 @@
             var clock = new SystemClock();
             var stateMachine = new SimpleStateMachine();
             var node = new RaftNode(nodeId, NodeState.Follower, clock, transport, stateMachine);
+
+            node.OnCommandResponse += (nodeId, success, message) =>
+            {
+                CommandResponses[nodeId] = new CommandResponse { Success = success, Message = message };
+                InvokeAsync(StateHasChanged);
+            };
+
             Nodes[nodeId] = node;
             transport.AddNode(node);
             TimeoutRemaining[nodeId] = node.ElectionTimeout;
             StateMachineStates[nodeId] = new List<string>();
             CommandKeys[nodeId] = "";
             CommandValues[nodeId] = "";
-            CommandResponses[nodeId] = false;
+            CommandResponses[nodeId] = new CommandResponse { Success = false, Message = "" };
 
             stateMachine.OnCommandApplied += (command) =>
              {
@@ -303,5 +300,9 @@
     {
         _visualizationTimer?.Dispose();
     }
-
+    public class CommandResponse
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; }
+    }
 }
