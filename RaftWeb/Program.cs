@@ -62,7 +62,7 @@ app.MapPost("/request/appendEntries", async (AppendEntriesData request) =>
     };
 
     await node.ReceiveAppendEntriesAsync(appendEntries);
-    
+    Console.WriteLine("request appendEntries");
     return new AppendEntriesResponse
     {
         Success = node.LastAppendEntriesAccepted,
@@ -71,8 +71,9 @@ app.MapPost("/request/appendEntries", async (AppendEntriesData request) =>
     };
 });
 
-app.MapPost("/request/vote", (VoteRequestData request) =>
+app.MapPost("/request/vote", async (VoteRequestData request) =>
 {
+    Console.WriteLine("request vote");
     var voteRequest = new VoteRequest
     {
         CandidateId = request.CandidateId,
@@ -93,7 +94,7 @@ app.MapPost("/request/vote", (VoteRequestData request) =>
 app.MapPost("/request/command", async (ClientCommandData data) =>
 {
     var result = await node.ReceiveClientCommandAsync(data.Command);
-    
+    Console.WriteLine("command");
     return new CommandResult
     {
         Success = result,
