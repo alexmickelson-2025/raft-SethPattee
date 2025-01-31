@@ -7,9 +7,6 @@ services:
     user: 1000:100
     volumes:
       - ./:/app
-      - ./:/app:cached
-      - /app/RaftWeb/obj
-      - /app/RaftWeb/bin
     environment:
       - NODE_ID=1
       - OTHER_NODES=2,http://node2:8080;3,http://node3:8080
@@ -29,9 +26,6 @@ services:
     user: 1000:100
     volumes:
       - ./:/app
-      - ./:/app:cached
-      - /app/RaftWeb/obj
-      - /app/RaftWeb/bin
     environment:
       - NODE_ID=2
       - OTHER_NODES=1,http://node1:8080;3,http://node3:8080
@@ -51,9 +45,6 @@ services:
     user: 1000:100
     volumes:
       - ./:/app
-      - ./:/app:cached
-      - /app/RaftWeb/obj
-      - /app/RaftWeb/bin
     environment:
       - NODE_ID=3
       - OTHER_NODES=1,http://node1:8080;2,http://node2:8080
