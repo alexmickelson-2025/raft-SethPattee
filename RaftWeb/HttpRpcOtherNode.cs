@@ -1,4 +1,5 @@
-﻿using System.Net.Http.Json;
+﻿//HttpRpcOtherNode.cs
+using System.Net.Http.Json;
 
 public class HttpRpcOtherNode
 {
