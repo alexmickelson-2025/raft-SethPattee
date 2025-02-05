@@ -1,5 +1,4 @@
 ﻿//RaftNode.cs
-using NSubstitute.Routing.Handlers;
 
 public interface IClock
 {
@@ -872,3 +871,16 @@ public class CommandResult
     public string Message { get; set; }
     public Dictionary<string, string> StateMachineState { get; set; }
 }
+
+// public class NodeData
+// {
+//     public string NodeId { get; }
+//     public NodeState State { get; set; }
+//     public string? CurrentLeaderId { get; set; }
+//     public int Term { get; set; }
+//     public bool ElectionTimeoutExpired { get; set; }
+//     public int ElectionTimeout { get;  set; }
+//     public string? LastVoteCandidateId { get; set; }
+//     public Dictionary<string, string> StateMachineState { get; set; }
+
+// }
