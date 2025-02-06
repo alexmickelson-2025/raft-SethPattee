@@ -1,28 +1,32 @@
+using Microsoft.AspNetCore.DataProtection;
 using RaftDockerClient.Components;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("http://0.0.0.0:8080");
-// Add services to the container.
+
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-var app = builder.Build();
-
-// Configure the HTTP request pipeline.
-if (!app.Environment.IsDevelopment())
+builder.Services.AddAntiforgery(options => 
 {
-    app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
-    app.UseHsts();
-}
+    options.Cookie.SecurePolicy = CookieSecurePolicy.None;
+    options.SuppressXFrameOptionsHeader = true;
+    options.Cookie.HttpOnly = false;
+    options.HeaderName = "X-CSRF-TOKEN";
+    options.Cookie.Name = "CSRF-TOKEN";
+});
 
-app.UseHttpsRedirection();
+builder.Services.AddDataProtection()
+    .UseEphemeralDataProtectionProvider();  
 
+var app = builder.Build();
 
 app.UseAntiforgery();
 
+app.MapGet("/health", () => "healthy");
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .DisableAntiforgery(); 
 
 app.Run();
