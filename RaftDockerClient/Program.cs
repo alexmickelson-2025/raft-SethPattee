@@ -4,6 +4,9 @@ using RaftDockerClient.Components;
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("http://0.0.0.0:8080");
 
+// Register HttpClient for dependency injection.
+builder.Services.AddHttpClient();
+
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 

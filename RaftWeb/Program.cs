@@ -2,8 +2,11 @@ using System.Text.Json;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Resources;
 
+//NodeWeb.cs
+
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("http://0.0.0.0:8080");
+
 
 // Environment variables
 var nodeId = Environment.GetEnvironmentVariable("NODE_ID") ?? throw new Exception("NODE_ID environment variable not set");
@@ -35,11 +38,12 @@ logger.LogInformation("Other nodes environment config: {config}", otherNodesRaw)
 
 // Initialize system clock and transport
 var clock = new SystemClock();
-var transport = new HttpTransport(nodeId, otherNodesRaw);
+var transportLogger = app.Services.GetService<ILogger<HttpTransport>>();
+var transport = new HttpTransport(nodeId, otherNodesRaw, transportLogger);
 var stateMachine = new SimpleStateMachine();
 
 // Create the Raft node
-var node = new RaftNode(nodeId, NodeState.Follower, clock, transport, stateMachine);
+var node = new RaftNode(nodeId, NodeState.Leader, clock, transport, stateMachine);
 
 // Set node interval scalar if provided
 if (double.TryParse(nodeIntervalScalarRaw, out double scalar))
@@ -52,6 +56,12 @@ if (double.TryParse(nodeIntervalScalarRaw, out double scalar))
 }
 
 app.MapGet("/health", () => "healthy");
+app.MapPost("/response/appendEntries", async (AppendEntriesResponse response) =>
+{
+    logger.LogInformation("Received append entries response: {response}", response);
+    await node.ReceiveAppendEntriesResponseAsync(response, nodeId);
+    return Results.Ok();
+});
 
 app.MapGet("/nodeData", () => new NodeData
 {
@@ -77,8 +87,18 @@ app.MapPost("/request/appendEntries", async (AppendEntriesData request) =>
         LogEntries = request.LogEntries
     };
     await node.ReceiveAppendEntriesAsync(appendEntries);
-    return Results.Ok();
+
+    // Create and return a proper JSON response
+    var responseData = new RespondEntriesData
+    {
+        Success = true,
+        Term = node.Term,           // You might update this based on your Raft logic
+        LastLogIndex = node.CommitIndex
+    };
+
+    return Results.Ok(responseData);
 });
+
 
 app.MapPost("/request/vote", async (VoteRequestData request) =>
 {
@@ -98,9 +118,22 @@ app.MapPost("/request/vote", async (VoteRequestData request) =>
     });
 });
 
+
 app.MapPost("/request/command", async (ClientCommandData data) =>
 {
+    logger.LogInformation("Received command: {Command}", data.Command);
+
     var success = await node.ReceiveClientCommandAsync(data.Command);
+    
+    if (success)
+    {
+        logger.LogInformation("Command processed successfully");
+    }
+    else
+    {
+        logger.LogWarning("Command processing failed");
+    }
+
     return Results.Ok(new CommandResult
     {
         Success = success,
@@ -109,13 +142,20 @@ app.MapPost("/request/command", async (ClientCommandData data) =>
     });
 });
 
+
 _ = Task.Run(async () =>
 {
     while (true)
     {
+        if (node.State == NodeState.Leader)
+        {
+            await node.RunLeaderTasksAsync();
+        }
         await node.CheckElectionTimeoutAsync();
+        await Task.Delay(50); // check frequently
     }
 });
+
 
 if (node.State == NodeState.Leader)
 {

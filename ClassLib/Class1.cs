@@ -758,6 +758,7 @@ public class RaftNode
 
         if (State == NodeState.Follower && _electionTimerExpired)
         {
+            Console.WriteLine($"Node {NodeId}: Election timeout expired. Starting new election.");
             await Task.Delay(new Random().Next(50, 150));
             await StartElection();
         }
@@ -871,16 +872,3 @@ public class CommandResult
     public string Message { get; set; }
     public Dictionary<string, string> StateMachineState { get; set; }
 }
-
-// public class NodeData
-// {
-//     public string NodeId { get; }
-//     public NodeState State { get; set; }
-//     public string? CurrentLeaderId { get; set; }
-//     public int Term { get; set; }
-//     public bool ElectionTimeoutExpired { get; set; }
-//     public int ElectionTimeout { get;  set; }
-//     public string? LastVoteCandidateId { get; set; }
-//     public Dictionary<string, string> StateMachineState { get; set; }
-
-// }

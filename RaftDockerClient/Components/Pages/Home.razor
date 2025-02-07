@@ -1,6 +1,8 @@
 ﻿@page "/"
+@rendermode InteractiveServer
 @using System.Collections.Concurrent
-
+@using System.Text.Json
+@* This is the client *@
 <div class="p-4">
     <h1 class="text-2xl font-bold mb-4">Raft Web Client</h1>
     <p class="mb-6">Welcome to your Raft Cluster Manager!</p>
@@ -8,25 +10,30 @@
     <div class="grid gap-4">
         @foreach (var entry in data)
         {
+            <div>
+                <p>Nodes fetched: @data.Count</p>
+            </div>
+
             <div class="border p-4 rounded-lg shadow-sm">
                 <h2 class="text-xl font-semibold mb-2">Node @entry.Value.NodeId</h2>
                 <div class="grid grid-cols-2 gap-2">
                     <div class="flex items-center">
                         <span class="font-medium mr-2">State:</span>
                         <span class="px-2 py-1 rounded-full text-sm
-                            @(entry.Value.State == 0 ? "bg-gray-200" : 
-                              entry.Value.State.ToString() == "1" ? "bg-yellow-200" : 
-                              "bg-green-200")">
-                            @(entry.Value.State == 0 ? "Follower" :
-                              entry.Value.State.ToString() == "1" ? "Candidate" :
-                              "Leader")
-                        </span>
+        @(entry.Value.State == NodeState.Follower ? "bg-gray-200" :
+                entry.Value.State == NodeState.Candidate ? "bg-yellow-200" :
+                "bg-green-200")">
+                            @(entry.Value.State == NodeState.Follower ? "Follower" :
+                                                    entry.Value.State == NodeState.Candidate ? "Candidate" :
+                                                    "Leader")
+                    </span>
+
                     </div>
                     <div>
                         <span class="font-medium">Term:</span> @entry.Value.Term
                     </div>
                     <div>
-                        <span class="font-medium">Leader ID:</span> 
+                        <span class="font-medium">Leader ID:</span>
                         @(string.IsNullOrEmpty(entry.Value.CurrentLeaderId) ? "None" : entry.Value.CurrentLeaderId)
                     </div>
                     <div>
@@ -34,7 +41,7 @@
                     </div>
                 </div>
 
-                @if (entry.Value.Log.Any())
+            @if (entry.Value.Log?.Any() == true)
                 {
                     <div class="mt-4">
                         <h3 class="font-medium mb-2">Log Entries</h3>
@@ -47,12 +54,12 @@
                     </div>
                 }
 
+
                 <div class="mt-4">
-                    <input type="text" @bind="commandData[entry.Key]" 
-                           class="border rounded px-2 py-1 mr-2" 
-                           placeholder="Enter command" />
+                    <input type="text" @bind="commandData[entry.Key]" class="border rounded px-2 py-1 mr-2"
+                        placeholder="Enter command" />
                     <button @onclick="() => SendCommand(entry.Key)"
-                            class="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600">
+                        class="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600">
                         Send Command
                     </button>
                 </div>
@@ -80,6 +87,11 @@
 
     private async Task UpdateNodeDataAsync(string url)
     {
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+
         while (true)
         {
             try
@@ -90,11 +102,11 @@
                 {
                     var content = await response.Content.ReadAsStringAsync();
                     Console.WriteLine($"Received data from {url}: {content}");
-                    var nodeData = System.Text.Json.JsonSerializer.Deserialize<NodeData>(content);
+                    var nodeData = System.Text.Json.JsonSerializer.Deserialize<NodeData>(content, options);
                     if (nodeData != null)
                     {
                         data[url] = nodeData;
-                        StateHasChanged();
+                        await InvokeAsync(StateHasChanged);
                     }
                 }
                 else
@@ -109,6 +121,7 @@
             await Task.Delay(5000);
         }
     }
+
 
     private async Task SendCommand(string url)
     {
@@ -140,7 +153,7 @@
         public int Term { get; set; }
         public string CurrentLeaderId { get; set; }
         public int CommitIndex { get; set; }
-        public List<LogEntry> Log { get; set; }
+        public List<LogEntry> Log { get; set; } = new List<LogEntry>();
         public bool Paused { get; set; }
     }
 
