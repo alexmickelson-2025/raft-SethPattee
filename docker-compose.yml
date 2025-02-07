@@ -49,6 +49,8 @@ services:
       - OTHER_NODES=1,http://node1:8080,http://node2:8080,http://node3:8080
       - NODE_INTERVAL_SCALAR=50
     command: dotnet watch --project RaftDockerClient
+    ports:
+    - 5132:8080
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
