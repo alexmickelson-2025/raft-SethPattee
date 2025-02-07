@@ -12,7 +12,7 @@ public interface ITransport
     Task<bool> SendVoteRequestAsync(VoteRequest request, string recipientNodeId);
     Task SendAppendEntriesResponseAsync(AppendEntriesResponse response, string recipientNodeId);
 
-    IEnumerable<string> GetOtherNodeIds(string currentNodeId); 
+    IEnumerable<string> GetOtherNodeIds(string currentNodeId);
 }
 
 public interface IStateMachine
@@ -29,10 +29,10 @@ public class RaftNode
     public string? CurrentLeaderId { get; set; }
     public int Term { get; set; }
     public bool ElectionTimeoutExpired => _electionTimerExpired;
-    public int ElectionTimeout { get;  set; }
+    public int ElectionTimeout { get; set; }
     public string? LastVoteCandidateId { get; set; }
-    public bool LastVoteGranted { get;  set; }
-    public bool LastAppendEntriesAccepted { get;  set; }
+    public bool LastVoteGranted { get; set; }
+    public bool LastAppendEntriesAccepted { get; set; }
 
     public IClock _clock;
     public ITransport _transport;
@@ -49,6 +49,7 @@ public class RaftNode
 
     public event Action<string> OnStateMachineUpdate;
     public IReadOnlyList<LogEntry> Log => _log.AsReadOnly();
+    
     public int CommitIndex
     {
         get => _commitIndex;
@@ -81,6 +82,7 @@ public class RaftNode
         _transport = transport;
         _stateMachine = stateMachine;
         Term = 0;
+        _log = new List<LogEntry>();
         ResetElectionTimer();
 
         if (initialState == NodeState.Leader)
@@ -101,6 +103,7 @@ public class RaftNode
         _transport = transport;
         _stateMachine = stateMachine;
         Term = 0;
+        _log = new List<LogEntry>();
         ResetElectionTimer();
 
         _stateMachine.OnCommandApplied += (command) => OnStateMachineUpdate?.Invoke(command);
@@ -172,16 +175,25 @@ public class RaftNode
         try
         {
             var logEntry = new LogEntry { Term = Term, Command = command };
-            _log.Add(logEntry);
+            _log.Add(logEntry); 
             int newEntryIndex = _log.Count - 1;
 
             Console.WriteLine($"Leader {NodeId}: Added new entry at index {newEntryIndex}");
 
-            var replicationSuccess = new Dictionary<string, bool>();
             var otherNodes = _transport.GetOtherNodeIds(NodeId).ToList();
-            int majorityNeeded = (otherNodes.Count + 1) / 2 + 1;
+            foreach (var nodeId in otherNodes)
+            {
+                var appendEntries = new AppendEntries
+                {
+                    Term = Term,
+                    LeaderId = NodeId,
+                    LogEntries = new List<LogEntry> { logEntry }
+                };
 
-            bool commitSuccessful = await TryReplicateEntry(newEntryIndex, replicationSuccess, otherNodes, majorityNeeded);
+                await _transport.SendAppendEntriesAsync(appendEntries, nodeId);
+            }
+
+            bool commitSuccessful = await TryReplicateEntry(newEntryIndex, new Dictionary<string, bool>(), otherNodes, (otherNodes.Count + 1) / 2 + 1);
 
             if (commitSuccessful)
             {
@@ -191,7 +203,7 @@ public class RaftNode
             }
             else if (State == NodeState.Leader)
             {
-                _log.RemoveAt(_log.Count - 1);
+                _log.RemoveAt(_log.Count - 1); // Rollback if replication fails
                 OnCommandResponse?.Invoke(NodeId, false, "Failed to replicate command");
                 onCommitConfirmed?.Invoke(false);
             }
@@ -205,7 +217,7 @@ public class RaftNode
             return false;
         }
     }
-    private async Task<bool> TryReplicateEntry(int newEntryIndex, Dictionary<string, bool> replicationSuccess,
+    public async Task<bool> TryReplicateEntry(int newEntryIndex, Dictionary<string, bool> replicationSuccess,
     List<string> otherNodes, int majorityNeeded)
     {
         int maxRetries = 3;
@@ -256,7 +268,7 @@ public class RaftNode
                             Console.WriteLine($"  Node {status.Key}: {status.Value}");
                         }
 
-                        int successCount = replicationSuccess.Count(x => x.Value) + 1; 
+                        int successCount = replicationSuccess.Count(x => x.Value) + 1;
                         Console.WriteLine($"Leader {NodeId}: Success count: {successCount}, Majority needed: {majorityNeeded}");
 
                         if (successCount >= majorityNeeded)
@@ -325,13 +337,8 @@ public class RaftNode
             Console.WriteLine($"Error applying committed entries: {ex.Message}");
         }
     }
-
-
-
-
     public List<LogEntry> GetLog()
     {
-
         return _log;
     }
     public async Task RunLeaderTasksAsync()
@@ -744,7 +751,7 @@ public class RaftNode
         if (Paused == false)
         {
             var random = new Random();
-            ElectionTimeout = random.Next(TimerLowerBound *2 , TimerUpperBound*2 );
+            ElectionTimeout = random.Next(TimerLowerBound * 2, TimerUpperBound * 2);
             _electionTimerExpired = false;
         }
     }
@@ -842,6 +849,7 @@ public class SimpleStateMachine : IStateMachine
 {
     private Dictionary<string, string> _state = new();
     public event Action<string>? OnCommandApplied;
+    public List<string> AppliedCommands { get; private set; }
 
     public async Task ApplyAsync(string command)
     {
@@ -857,7 +865,9 @@ public class SimpleStateMachine : IStateMachine
 
             OnCommandApplied?.Invoke($"SET {key}={value}");
             Console.WriteLine($"State machine updated: {key}={value}");
+            AppliedCommands.Add(command);
         }
+
     }
 
     public Dictionary<string, string> GetState()
@@ -871,4 +881,8 @@ public class CommandResult
     public bool Success { get; set; }
     public string Message { get; set; }
     public Dictionary<string, string> StateMachineState { get; set; }
+}
+public interface ILog
+{
+    void Add(LogEntry entry);
 }

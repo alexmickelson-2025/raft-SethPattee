@@ -20,12 +20,11 @@
                     <div class="flex items-center">
                         <span class="font-medium mr-2">State:</span>
                         <span class="px-2 py-1 rounded-full text-sm
-        @(entry.Value.State == NodeState.Follower ? "bg-gray-200" :
-                entry.Value.State == NodeState.Candidate ? "bg-yellow-200" :
-                "bg-green-200")">
-                            @(entry.Value.State == NodeState.Follower ? "Follower" :
-                                                    entry.Value.State == NodeState.Candidate ? "Candidate" :
-                                                    "Leader")
+                            @(entry.Value.State == 0 ? "bg-gray-200" :
+                                    entry.Value.State == NodeState.Candidate ? "bg-yellow-200" :
+                                    "bg-green-200")">
+                            @(entry.Value.State == 0 ? "Follower" :
+                                entry.Value.State == NodeState.Candidate ? "Candidate" : "Leader")
                     </span>
 
                     </div>
