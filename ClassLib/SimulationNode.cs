@@ -14,7 +14,12 @@ public class MockTransport : ITransport
 {
     private readonly Dictionary<string, RaftNode> _nodes = new();
     private int _networkDelay;
+    public List<AppendEntries> SentAppendEntries { get; } = new List<AppendEntries>();
 
+    public void SendAppendEntries(AppendEntries entries)
+    {
+        SentAppendEntries.Add(entries);
+    }
     public MockTransport()
     {
         _networkDelay = 0;
