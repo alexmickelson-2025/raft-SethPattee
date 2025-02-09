@@ -8,3 +8,9 @@ public class NodeData
     public List<LogEntry> Log { get; set; }
     public bool Paused { get; set; }
 }
+public enum NodeState
+{
+    Follower,
+    Candidate,
+    Leader
+}

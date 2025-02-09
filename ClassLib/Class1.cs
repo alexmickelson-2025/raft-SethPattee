@@ -802,12 +802,6 @@ public class RaftNode
 
 }
 
-public enum NodeState
-{
-    Follower,
-    Candidate,
-    Leader
-}
 
 public class LogEntry
 {
