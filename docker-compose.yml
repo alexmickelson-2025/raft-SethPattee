@@ -46,7 +46,7 @@ services:
       context: .
       dockerfile: dev-slow.Dockerfile
     environment:
-      - URLS=1,http://node1:8080,http://node2:8080,http://node3:8080
+      - URLS=http://node1:8080,http://node2:8080,http://node3:8080
       - NODE_INTERVAL_SCALAR=50
     command: dotnet watch --project RaftDockerClient
     ports:
