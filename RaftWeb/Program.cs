@@ -149,7 +149,7 @@ _ = Task.Run(async () =>
         {
             await raftNode.StartElection();
         }
-        await raftNode.CheckElectionTimeNodeIdoutAsync();
+        await raftNode.CheckElectionTimeoutAsync();
         await Task.Delay(50); // check frequently
     }
 });
