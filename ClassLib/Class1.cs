@@ -49,7 +49,7 @@ public class RaftNode
 
     public event Action<string> OnStateMachineUpdate;
     public IReadOnlyList<LogEntry> Log => _log.AsReadOnly();
-    
+
     public int CommitIndex
     {
         get => _commitIndex;
@@ -123,177 +123,177 @@ public class RaftNode
         return logIndex <= _commitIndex;
     }
     public async Task<bool> ReceiveClientCommandAsync(string command, Action<bool> onCommitConfirmed = null)
-{
-    
-    if (Paused)
     {
-        OnCommandResponse?.Invoke(NodeId, false, "Node is paused");
-        onCommitConfirmed?.Invoke(false);
-        return false;
-    }
 
-    if (State != NodeState.Leader)
-    {
-        if (string.IsNullOrEmpty(CurrentLeaderId))
+        if (Paused)
         {
-            OnCommandResponse?.Invoke(NodeId, false, "No leader currently known");
+            OnCommandResponse?.Invoke(NodeId, false, "Node is paused");
             onCommitConfirmed?.Invoke(false);
             return false;
         }
 
+        if (State != NodeState.Leader)
+        {
+            if (string.IsNullOrEmpty(CurrentLeaderId))
+            {
+                OnCommandResponse?.Invoke(NodeId, false, "No leader currently known");
+                onCommitConfirmed?.Invoke(false);
+                return false;
+            }
+
+            try
+            {
+                var appendEntries = new AppendEntries
+                {
+                    Term = Term,
+                    LeaderId = CurrentLeaderId,
+                    LogEntries = new List<LogEntry> { new LogEntry { Term = Term, Command = command } }
+                };
+
+                var response = await _transport.SendAppendEntriesAsync(appendEntries, CurrentLeaderId);
+
+                if (response.Success)
+                {
+                    OnCommandResponse?.Invoke(NodeId, true, $"Command forwarded to leader {CurrentLeaderId}");
+                    onCommitConfirmed?.Invoke(true);
+                    return true;
+                }
+                else
+                {
+                    OnCommandResponse?.Invoke(NodeId, false, $"Leader {CurrentLeaderId} rejected the command");
+                    onCommitConfirmed?.Invoke(false);
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                OnCommandResponse?.Invoke(NodeId, false, $"Error forwarding command: {ex.Message}");
+                onCommitConfirmed?.Invoke(false);
+                return false;
+            }
+        }
+
         try
         {
-            var appendEntries = new AppendEntries
-            {
-                Term = Term,
-                LeaderId = CurrentLeaderId,
-                LogEntries = new List<LogEntry> { new LogEntry { Term = Term, Command = command } }
-            };
+            var logEntry = new LogEntry { Term = Term, Command = command };
+            _log.Add(logEntry);
+            int newEntryIndex = _log.Count - 1;
 
-            var response = await _transport.SendAppendEntriesAsync(appendEntries, CurrentLeaderId);
+            Console.WriteLine($"Leader {NodeId}: Added new entry at index {newEntryIndex}");
 
-            if (response.Success)
+            var otherNodes = _transport.GetOtherNodeIds(NodeId).ToList();
+            bool commitSuccessful = await TryReplicateEntry(newEntryIndex, new Dictionary<string, bool>(), otherNodes, (otherNodes.Count + 1) / 2 + 1);
+
+            if (commitSuccessful)
             {
-                OnCommandResponse?.Invoke(NodeId, true, $"Command forwarded to leader {CurrentLeaderId}");
+                OnCommandResponse?.Invoke(NodeId, true, "Command committed successfully");
                 onCommitConfirmed?.Invoke(true);
                 return true;
             }
             else
             {
-                OnCommandResponse?.Invoke(NodeId, false, $"Leader {CurrentLeaderId} rejected the command");
-                onCommitConfirmed?.Invoke(false);
+                // Replication failed, roll back the log entry
+                _log.RemoveAt(_log.Count - 1);
+
+                // Do not send a response to the client
+                Console.WriteLine($"Leader {NodeId}: Failed to replicate command, no response sent to client");
                 return false;
             }
         }
         catch (Exception ex)
         {
-            OnCommandResponse?.Invoke(NodeId, false, $"Error forwarding command: {ex.Message}");
+            OnCommandResponse?.Invoke(NodeId, false, $"Error processing command: {ex.Message}");
             onCommitConfirmed?.Invoke(false);
             return false;
         }
     }
-
-    try
+    public async Task<bool> TryReplicateEntry(int newEntryIndex, Dictionary<string, bool> replicationSuccess, List<string> otherNodes, int majorityNeeded)
     {
-        var logEntry = new LogEntry { Term = Term, Command = command };
-        _log.Add(logEntry);
-        int newEntryIndex = _log.Count - 1;
+        int maxRetries = 3;
 
-        Console.WriteLine($"Leader {NodeId}: Added new entry at index {newEntryIndex}");
+        Console.WriteLine($"Leader {NodeId}: Attempting to replicate entry {newEntryIndex}. Majority needed: {majorityNeeded}");
 
-        var otherNodes = _transport.GetOtherNodeIds(NodeId).ToList();
-        bool commitSuccessful = await TryReplicateEntry(newEntryIndex, new Dictionary<string, bool>(), otherNodes, (otherNodes.Count + 1) / 2 + 1);
-
-        if (commitSuccessful)
+        for (int retry = 0; retry < maxRetries && State == NodeState.Leader && !Paused; retry++)
         {
-            OnCommandResponse?.Invoke(NodeId, true, "Command committed successfully");
-            onCommitConfirmed?.Invoke(true);
-            return true;
-        }
-        else
-        {
-            // Replication failed, roll back the log entry
-            _log.RemoveAt(_log.Count - 1);
+            foreach (var followerId in otherNodes)
+            {
+                if (replicationSuccess.ContainsKey(followerId) && replicationSuccess[followerId])
+                    continue;
 
-            // Do not send a response to the client
-            Console.WriteLine($"Leader {NodeId}: Failed to replicate command, no response sent to client");
-            return false;
+                try
+                {
+                    var prevLogIndex = _nextIndex[followerId] - 1;
+                    var prevLogTerm = prevLogIndex >= 0 && prevLogIndex < _log.Count
+                        ? _log[prevLogIndex].Term
+                        : -1;
+
+                    var entriesToSend = _log
+                        .Skip(_nextIndex[followerId])
+                        .ToList();
+
+                    Console.WriteLine($"Leader {NodeId}: Sending to {followerId} - PrevLogIndex: {prevLogIndex}, Entries: {entriesToSend.Count}");
+
+                    var appendEntries = new AppendEntries
+                    {
+                        Term = Term,
+                        LeaderId = NodeId,
+                        PrevLogIndex = prevLogIndex,
+                        PrevLogTerm = prevLogTerm,
+                        LeaderCommit = _commitIndex,
+                        LogEntries = entriesToSend
+                    };
+
+                    var response = await _transport.SendAppendEntriesAsync(appendEntries, followerId);
+
+                    if (response.Success)
+                    {
+                        _nextIndex[followerId] = newEntryIndex + 1;
+                        replicationSuccess[followerId] = true;
+                        Console.WriteLine($"Leader {NodeId}: Successful replication to {followerId}");
+
+                        Console.WriteLine($"Leader {NodeId}: Current replication status:");
+                        foreach (var status in replicationSuccess)
+                        {
+                            Console.WriteLine($"  Node {status.Key}: {status.Value}");
+                        }
+
+                        int successCount = replicationSuccess.Count(x => x.Value) + 1;
+                        Console.WriteLine($"Leader {NodeId}: Success count: {successCount}, Majority needed: {majorityNeeded}");
+
+                        if (successCount >= majorityNeeded)
+                        {
+                            _commitIndex = newEntryIndex;
+                            Console.WriteLine($"Leader {NodeId}: Majority achieved. Committing entry {newEntryIndex}");
+                            await ApplyCommittedEntriesAsync();
+                            return true;
+                        }
+                    }
+                    else if (response.Term > Term)
+                    {
+                        Console.WriteLine($"Leader {NodeId}: Stepping down (higher term: {response.Term})");
+                        Term = response.Term;
+                        State = NodeState.Follower;
+                        CurrentLeaderId = null;
+                        return false;
+                    }
+                    else
+                    {
+                        _nextIndex[followerId] = Math.Max(0, _nextIndex[followerId] - 1);
+                        Console.WriteLine($"Leader {NodeId}: Failed replication to {followerId}, decremented nextIndex to {_nextIndex[followerId]}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error replicating to {followerId}: {ex.Message}");
+                }
+            }
+
+            if (retry < maxRetries - 1)
+                await Task.Delay(50);
         }
-    }
-    catch (Exception ex)
-    {
-        OnCommandResponse?.Invoke(NodeId, false, $"Error processing command: {ex.Message}");
-        onCommitConfirmed?.Invoke(false);
+
         return false;
     }
-}
-   public async Task<bool> TryReplicateEntry(int newEntryIndex, Dictionary<string, bool> replicationSuccess, List<string> otherNodes, int majorityNeeded)
-{
-    int maxRetries = 3;
-
-    Console.WriteLine($"Leader {NodeId}: Attempting to replicate entry {newEntryIndex}. Majority needed: {majorityNeeded}");
-
-    for (int retry = 0; retry < maxRetries && State == NodeState.Leader && !Paused; retry++)
-    {
-        foreach (var followerId in otherNodes)
-        {
-            if (replicationSuccess.ContainsKey(followerId) && replicationSuccess[followerId])
-                continue;
-
-            try
-            {
-                var prevLogIndex = _nextIndex[followerId] - 1;
-                var prevLogTerm = prevLogIndex >= 0 && prevLogIndex < _log.Count
-                    ? _log[prevLogIndex].Term
-                    : -1;
-
-                var entriesToSend = _log
-                    .Skip(_nextIndex[followerId])
-                    .ToList();
-
-                Console.WriteLine($"Leader {NodeId}: Sending to {followerId} - PrevLogIndex: {prevLogIndex}, Entries: {entriesToSend.Count}");
-
-                var appendEntries = new AppendEntries
-                {
-                    Term = Term,
-                    LeaderId = NodeId,
-                    PrevLogIndex = prevLogIndex,
-                    PrevLogTerm = prevLogTerm,
-                    LeaderCommit = _commitIndex,
-                    LogEntries = entriesToSend
-                };
-
-                var response = await _transport.SendAppendEntriesAsync(appendEntries, followerId);
-
-                if (response.Success)
-                {
-                    _nextIndex[followerId] = newEntryIndex + 1;
-                    replicationSuccess[followerId] = true;
-                    Console.WriteLine($"Leader {NodeId}: Successful replication to {followerId}");
-
-                    Console.WriteLine($"Leader {NodeId}: Current replication status:");
-                    foreach (var status in replicationSuccess)
-                    {
-                        Console.WriteLine($"  Node {status.Key}: {status.Value}");
-                    }
-
-                    int successCount = replicationSuccess.Count(x => x.Value) + 1;
-                    Console.WriteLine($"Leader {NodeId}: Success count: {successCount}, Majority needed: {majorityNeeded}");
-
-                    if (successCount >= majorityNeeded)
-                    {
-                        _commitIndex = newEntryIndex;
-                        Console.WriteLine($"Leader {NodeId}: Majority achieved. Committing entry {newEntryIndex}");
-                        await ApplyCommittedEntriesAsync();
-                        return true;
-                    }
-                }
-                else if (response.Term > Term)
-                {
-                    Console.WriteLine($"Leader {NodeId}: Stepping down (higher term: {response.Term})");
-                    Term = response.Term;
-                    State = NodeState.Follower;
-                    CurrentLeaderId = null;
-                    return false;
-                }
-                else
-                {
-                    _nextIndex[followerId] = Math.Max(0, _nextIndex[followerId] - 1);
-                    Console.WriteLine($"Leader {NodeId}: Failed replication to {followerId}, decremented nextIndex to {_nextIndex[followerId]}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error replicating to {followerId}: {ex.Message}");
-            }
-        }
-
-        if (retry < maxRetries - 1)
-            await Task.Delay(50);
-    }
-
-    return false;
-}
 
 
     public Dictionary<string, string> GetStateMachineState()
@@ -348,65 +348,65 @@ public class RaftNode
     }
 
     public async Task SendHeartbeatAsync()
-{
-    if (State != NodeState.Leader || Paused)
-        return;
-
-    var otherNodes = _transport.GetOtherNodeIds(NodeId).ToList();
-
-    foreach (var followerId in otherNodes)
     {
-        if (!_nextIndex.ContainsKey(followerId))
+        if (State != NodeState.Leader || Paused)
+            return;
+
+        var otherNodes = _transport.GetOtherNodeIds(NodeId).ToList();
+        CurrentLeaderId = NodeId;
+        foreach (var followerId in otherNodes)
         {
-            _nextIndex[followerId] = _log.Count;
-            continue;
-        }
-
-        try
-        {
-            var prevLogIndex = _nextIndex[followerId] - 1;
-            var prevLogTerm = prevLogIndex >= 0 && prevLogIndex < _log.Count
-                ? _log[prevLogIndex].Term
-                : -1;
-
-            var entriesToSend = _log
-                .Skip(_nextIndex[followerId])
-                .ToList();
-
-            var appendEntries = new AppendEntries
-            {
-                Term = Term,
-                LeaderId = NodeId,
-                PrevLogIndex = prevLogIndex,
-                PrevLogTerm = prevLogTerm,
-                LeaderCommit = _commitIndex,
-                LogEntries = entriesToSend
-            };
-
-            var response = await _transport.SendAppendEntriesAsync(appendEntries, followerId);
-
-            if (response.Success)
+            if (!_nextIndex.ContainsKey(followerId))
             {
                 _nextIndex[followerId] = _log.Count;
+                continue;
             }
-            else if (response.Term > Term)
+
+            try
             {
-                Term = response.Term;
-                State = NodeState.Follower;
-                CurrentLeaderId = null;
-                return;
+                var prevLogIndex = _nextIndex[followerId] - 1;
+                var prevLogTerm = prevLogIndex >= 0 && prevLogIndex < _log.Count
+                    ? _log[prevLogIndex].Term
+                    : -1;
+
+                var entriesToSend = _log
+                    .Skip(_nextIndex[followerId])
+                    .ToList();
+
+                var appendEntries = new AppendEntries
+                {
+                    Term = Term,
+                    LeaderId = NodeId,
+                    PrevLogIndex = prevLogIndex,
+                    PrevLogTerm = prevLogTerm,
+                    LeaderCommit = _commitIndex,
+                    LogEntries = entriesToSend
+                };
+
+                var response = await _transport.SendAppendEntriesAsync(appendEntries, followerId);
+
+                if (response.Success)
+                {
+                    _nextIndex[followerId] = _log.Count;
+                }
+                else if (response.Term > Term)
+                {
+                    Term = response.Term;
+                    State = NodeState.Follower;
+                    CurrentLeaderId = null;
+                    return;
+                }
+                else
+                {
+                    _nextIndex[followerId] = Math.Max(0, _nextIndex[followerId] - 1);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                _nextIndex[followerId] = Math.Max(0, _nextIndex[followerId] - 1);
+                Console.WriteLine($"Error sending heartbeat to {followerId}: {ex.Message}");
             }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error sending heartbeat to {followerId}: {ex.Message}");
         }
     }
-}
     public void ReceiveAppendEntries(AppendEntries appendEntries)
     {
         if (Paused == false)
@@ -418,7 +418,8 @@ public class RaftNode
             }
 
             ResetElectionTimer();
-            _electionTimerExpired = false;
+            
+
 
             if (State != NodeState.Follower)
             {
@@ -469,7 +470,6 @@ public class RaftNode
         }
 
         ResetElectionTimer();
-        _electionTimerExpired = false;
         CurrentLeaderId = appendEntries.LeaderId;
 
         if (appendEntries.PrevLogIndex >= 0)
@@ -549,7 +549,7 @@ public class RaftNode
         if (response.Success)
         {
             _nextIndex[followerId] = response.LastLogIndex + 1;
-            
+
 
             for (int i = _commitIndex + 1; i < _log.Count; i++)
             {
@@ -595,10 +595,6 @@ public class RaftNode
         }
     }
 
-
-
-
-
     public async Task ReceiveVoteRequestAsync(VoteRequest request)
     {
         if (Paused == false)
@@ -622,7 +618,7 @@ public class RaftNode
             LastVoteCandidateId = request.CandidateId;
             LastVoteGranted = true;
             ResetElectionTimer();
-            _electionTimerExpired = false;
+            
         }
     }
 
@@ -644,7 +640,7 @@ public class RaftNode
 
         int votesReceived = 1;
         var otherNodes = _transport.GetOtherNodeIds(NodeId).ToList();
-        int majorityNeeded = (otherNodes.Count + 1) / 2 + 1;
+        int majorityNeeded = 2;
 
         try
         {
@@ -740,7 +736,7 @@ public class RaftNode
         if (Paused == false)
         {
             var random = new Random();
-            ElectionTimeout = random.Next(TimerLowerBound * 2, TimerUpperBound * 2);
+            ElectionTimeout = random.Next(TimerLowerBound, TimerUpperBound);
             _electionTimerExpired = false;
         }
     }
@@ -752,10 +748,21 @@ public class RaftNode
 
         await Task.Delay(ElectionTimeout);
 
+
+        if (State == NodeState.Follower || State == NodeState.Candidate)
+        {
+            ElectionTimeout -= 50;
+            if (ElectionTimeout <= 0)
+            {
+                _electionTimerExpired = true;
+                await StartElection();
+            }
+        }
+
         if (State == NodeState.Follower && _electionTimerExpired)
         {
             Console.WriteLine($"Node {NodeId}: Election timeout expired. Starting new election.");
-            await Task.Delay(new Random().Next(50, 150));
+            // await Task.Delay(new Random().Next(50, 150));
             await StartElection();
         }
     }
@@ -772,7 +779,8 @@ public class RaftNode
                     State = NodeState.Follower;
                     OnStateChanged();
                     ResetElectionTimer();
-                    _electionTimerExpired = false;
+                    
+
                 }
             }
         }
@@ -794,12 +802,6 @@ public class RaftNode
 
 }
 
-public enum NodeState
-{
-    Follower,
-    Candidate,
-    Leader
-}
 
 public class LogEntry
 {

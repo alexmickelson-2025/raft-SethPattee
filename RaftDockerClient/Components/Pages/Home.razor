@@ -4,14 +4,13 @@
 @using System.Text.Json
 <div class="p-4">
     <h1 class="text-2xl font-bold mb-4">Raft Web Client</h1>
-    <p class="mb-6">Welcome to your Raft Cluster Manager!</p>
-
+    <div>
+        <p>Nodes fetched: @data.Count</p>
+    </div>
     <div class="grid gap-4">
         @foreach (var entry in data)
         {
-            <div>
-                <p>Nodes fetched: @data.Count</p>
-            </div>
+
 
             <div class="border p-4 rounded-lg shadow-sm">
                 <h2 class="text-xl font-semibold mb-2">Node @entry.Value.NodeId</h2>
@@ -19,11 +18,11 @@
                     <div class="flex items-center">
                         <span class="font-medium mr-2">State:</span>
                         <span class="px-2 py-1 rounded-full text-sm
-                            @(entry.Value.State == 0 ? "bg-gray-200" :
+                                @(entry.Value.State == 0 ? "bg-gray-200" :
                                     entry.Value.State == NodeState.Candidate ? "bg-yellow-200" :
                                     "bg-green-200")">
                             @(entry.Value.State == 0 ? "Follower" :
-                                entry.Value.State == NodeState.Candidate ? "Candidate" : "Leader")
+                                                    entry.Value.State == NodeState.Candidate ? "Candidate" : "Leader")
                     </span>
 
                     </div>
@@ -36,7 +35,7 @@
                     </div>
                     <div>
                         <span class="font-medium">Commit Index:</span> @entry.Value.CommitIndex
-                    </div>
+                    </div>        
                 </div>
 
             @if (entry.Value.Log?.Any() == true)
@@ -144,23 +143,8 @@
         }
     }
 
-    public class NodeData
-    {
-        public string NodeId { get; set; }
-        public NodeState State { get; set; }
-        public int Term { get; set; }
-        public string CurrentLeaderId { get; set; }
-        public int CommitIndex { get; set; }
-        public List<LogEntry> Log { get; set; } = new List<LogEntry>();
-        public bool Paused { get; set; }
-    }
 
-    public enum NodeState
-    {
-        Follower,
-        Candidate,
-        Leader
-    }
+
 
     public class ClientCommandData
     {

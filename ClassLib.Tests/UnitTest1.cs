@@ -209,7 +209,7 @@ public class RaftNodeTests
         }
 
         // Assert
-        Assert.All(resetTimes, timeout => Assert.InRange(timeout, follower.TimerLowerBound * 2, follower.TimerUpperBound * 2));
+        Assert.All(resetTimes, timeout => Assert.InRange(timeout, follower.TimerLowerBound , follower.TimerUpperBound));
         Assert.True(resetTimes.Count > 1, "Random values should be different.");
     }
 
