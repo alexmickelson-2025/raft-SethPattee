@@ -319,7 +319,7 @@ public class RaftNodeTests
         var follower = new RaftNode("followerId", clock, transport);
 
         var request = new VoteRequest { CandidateId = "Node1", Term = 1 };
-        follower.ReceiveVoteRequest(request);
+        follower.ReceiveVoteRequestAsync(request);
 
         Assert.True(follower.LastVoteGranted);
     }
@@ -377,11 +377,11 @@ public class RaftNodeTests
         var request2 = new VoteRequest { CandidateId = "Node2", Term = 1 };
 
 
-        follower.ReceiveVoteRequest(request1);
+        follower.ReceiveVoteRequestAsync(request1);
         Assert.True(follower.LastVoteGranted);
 
 
-        follower.ReceiveVoteRequest(request2);
+        follower.ReceiveVoteRequestAsync(request2);
         Assert.False(follower.LastVoteGranted);
     }
 
@@ -394,7 +394,7 @@ public class RaftNodeTests
         var follower = new RaftNode(NodeState.Follower.ToString(), clock, transport);
 
         var request = new VoteRequest { CandidateId = "Node1", Term = 2 };
-        follower.ReceiveVoteRequest(request);
+        follower.ReceiveVoteRequestAsync(request);
 
         Assert.True(follower.LastVoteGranted);
     }

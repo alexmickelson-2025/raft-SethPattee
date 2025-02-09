@@ -92,7 +92,7 @@ app.MapPost("/request/appendEntries", async (AppendEntriesData request) =>
     var responseData = new RespondEntriesData
     {
         Success = true,
-        Term = node.Term,           // You might update this based on your Raft logic
+        Term = node.Term,          
         LastLogIndex = node.CommitIndex
     };
 
@@ -110,7 +110,7 @@ app.MapPost("/request/vote", async (VoteRequestData request) =>
         LastLogIndex = request.LastLogIndex,
         LastLogTerm = request.LastLogTerm
     };
-    node.ReceiveVoteRequest(voteRequest);
+    await node.ReceiveVoteRequestAsync(voteRequest);
     return Results.Ok(new VoteResponseData
     {
         VoteGranted = node.LastVoteGranted,

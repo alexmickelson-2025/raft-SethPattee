@@ -1,4 +1,6 @@
 //SimulationNode.cs
+using System.Diagnostics.CodeAnalysis;
+
 public class SystemClock : IClock
 {
     private DateTime _currentTime = DateTime.UtcNow;
@@ -73,7 +75,7 @@ public class MockTransport : ITransport
             throw new InvalidOperationException($"Node {recipientNodeId} not found");
         }
 
-        recipientNode.ReceiveVoteRequest(request);
+        await recipientNode.ReceiveVoteRequestAsync(request);
         return recipientNode.LastVoteGranted;
     }
 

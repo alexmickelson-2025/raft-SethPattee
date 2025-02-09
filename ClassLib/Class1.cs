@@ -599,7 +599,7 @@ public class RaftNode
 
 
 
-    public void ReceiveVoteRequest(VoteRequest request)
+    public async Task ReceiveVoteRequestAsync(VoteRequest request)
     {
         if (Paused == false)
         {
